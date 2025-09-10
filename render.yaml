@@ -1,8 +1,14 @@
+# render.yaml  (Blueprint)
 services:
-- type: web
-  name: socialdemo-backend
-  env: go
-  plan: free
-  autoDeploy: true
-  buildCommand: go build -o server .
-  startCommand: ./server
+  - type: web
+    name: socialdemo-backend
+    env: docker
+    plan: free
+    region: singapore   # 可改 closest 區域
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    healthCheckPath: /healthz
+    disks:
+      - name: data
+        mountPath: /data
+        sizeGB: 1

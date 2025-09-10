@@ -1,16 +1,20 @@
 # Dockerfile
-FROM golang:1.22 AS builder
+
+# ---- build stage ----
+FROM golang:1.22 AS build
 WORKDIR /app
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o server .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /server main.go
 
-FROM gcr.io/distroless/base-debian12
+# ---- run stage ----
+FROM alpine:3.20
 WORKDIR /app
+# 預先建立資料夾（Render 會把 Disk 掛上 /data；這步只是保險）
+RUN mkdir -p /data/uploads
 ENV DATA_DIR=/data
 ENV PORT=8080
-COPY --from=builder /app/server /app/server
+COPY --from=build /server /app/server
 EXPOSE 8080
-USER nonroot:nonroot
-ENTRYPOINT ["/app/server"]
+CMD ["/app/server"]

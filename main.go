@@ -20,12 +20,14 @@ type User struct {
 	Name        string  `json:"name"`
 	AvatarAsset *string `json:"avatarAsset,omitempty"`
 }
+
 type Comment struct {
 	ID        string `json:"id"`
 	Author    User   `json:"author"`
 	Text      string `json:"text"`
 	CreatedAt string `json:"createdAt"`
 }
+
 type Post struct {
 	ID        string    `json:"id"`
 	Author    User      `json:"author"`
@@ -43,12 +45,45 @@ type Store struct {
 	posts []Post
 }
 
+// ---- persist helpers ----
+
+func (s *Store) loadFromFile(path string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return // first run, no file yet
+	}
+	var arr []Post
+	if err := json.Unmarshal(b, &arr); err != nil {
+		log.Println("loadFromFile:", err)
+		return
+	}
+	s.mu.Lock()
+	s.posts = arr
+	s.mu.Unlock()
+}
+
+func (s *Store) saveToFile(path string) {
+	s.mu.RLock()
+	b, err := json.MarshalIndent(s.posts, "", "  ")
+	s.mu.RUnlock()
+	if err != nil {
+		log.Println("saveToFile marshal:", err)
+		return
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		log.Println("saveToFile write:", err)
+	}
+}
+
+// ---- in-memory ops ----
+
 func nowISO() string { return time.Now().UTC().Format(time.RFC3339) }
 
 func (s *Store) list(tab string, tags []string) []Post {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]Post, 0, len(s.posts))
+
 	if len(tags) > 0 {
 		tagset := map[string]struct{}{}
 		for _, t := range tags {
@@ -65,6 +100,7 @@ func (s *Store) list(tab string, tags []string) []Post {
 	} else {
 		out = append(out, s.posts...)
 	}
+
 	if tab == "hot" {
 		sort.Slice(out, func(i, j int) bool { return out[i].LikeCount > out[j].LikeCount })
 	} else {
@@ -72,12 +108,14 @@ func (s *Store) list(tab string, tags []string) []Post {
 	}
 	return out
 }
+
 func (s *Store) create(p Post) Post {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.posts = append([]Post{p}, s.posts...)
 	return p
 }
+
 func (s *Store) byID(id string) (Post, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -88,54 +126,75 @@ func (s *Store) byID(id string) (Post, int) {
 	}
 	return Post{}, -1
 }
+
 func (s *Store) updateAt(i int, p Post) Post {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.posts[i] = p
 	return p
 }
+
 func (s *Store) deleteAt(i int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.posts = append(s.posts[:i], s.posts[i+1:]...)
 }
 
+// ---- utils ----
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
+
 func ensureDir(d string) { _ = os.MkdirAll(d, 0o755) }
 
+// ---- main ----
+
 func main() {
-	// 路徑與埠由環境變數控制，方便 Render/Fly 等雲端
+	// 持久化根目錄（Render 會把 Disk 掛到 /data）
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
-		dataDir = "./data"
+		dataDir = "/data"
 	}
 	uploadsDir := filepath.Join(dataDir, "uploads")
+	postsFile := filepath.Join(dataDir, "posts.json")
+
 	ensureDir(uploadsDir)
 
 	store := &Store{}
-	// 初始假資料
-	store.create(Post{
-		ID:        "p1",
-		Author:    User{ID: "u_bob", Name: "Bob"},
-		Text:      "今天把 UI 卡片邊角修好了 ✅",
-		CreatedAt: nowISO(),
-		LikeCount: 5,
-		Comments:  []Comment{},
-		Tags:      []string{"flutter", "design"},
-	})
-	store.create(Post{
-		ID:        "p2",
-		Author:    User{ID: "u_me", Name: "Me"},
-		Text:      "嗨！這是我的第一篇 🙂",
-		CreatedAt: nowISO(),
-		LikeCount: 1,
-		Comments:  []Comment{},
-		Tags:      []string{"hello"},
-	})
+	// 先嘗試載入歷史資料
+	store.loadFromFile(postsFile)
+
+	// 如果沒有任何資料，塞入兩筆範例並保存
+	empty := false
+	func() {
+		store.mu.RLock()
+		empty = len(store.posts) == 0
+		store.mu.RUnlock()
+	}()
+	if empty {
+		store.create(Post{
+			ID:        "p1",
+			Author:    User{ID: "u_bob", Name: "Bob"},
+			Text:      "今天把 UI 卡片邊角修好了 ✅",
+			CreatedAt: nowISO(),
+			LikeCount: 5,
+			Comments:  []Comment{},
+			Tags:      []string{"flutter", "design"},
+		})
+		store.create(Post{
+			ID:        "p2",
+			Author:    User{ID: "u_me", Name: "Me"},
+			Text:      "嗨！這是我的第一篇 🙂",
+			CreatedAt: nowISO(),
+			LikeCount: 1,
+			Comments:  []Comment{},
+			Tags:      []string{"hello"},
+		})
+		store.saveToFile(postsFile)
+	}
 
 	mux := http.NewServeMux()
 
@@ -145,7 +204,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	// CORS（若有 Flutter Web 也可用）
+	// CORS（Flutter Web 也可用）
 	cors := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -159,7 +218,7 @@ func main() {
 		})
 	}
 
-	// 靜態檔案（持久化）：/uploads/* -> {DATA_DIR}/uploads/*
+	// 靜態檔案（持久化）：/uploads/* -> /data/uploads/*
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadsDir))))
 
 	// 圖片上傳：POST /upload (form-data: file=<檔案>)
@@ -223,9 +282,9 @@ func main() {
 			return '-'
 		}, base)
 		filename := ts + "_" + base + ext
-		path := filepath.Join(uploadsDir, filename)
+		dst := filepath.Join(uploadsDir, filename)
 
-		out, err := os.Create(path)
+		out, err := os.Create(dst)
 		if err != nil {
 			http.Error(w, "create file: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -269,11 +328,18 @@ func main() {
 				return
 			}
 			p := Post{
-				ID:     time.Now().Format("20060102T150405.000000000"),
-				Author: req.Author, Text: req.Text, CreatedAt: nowISO(),
-				LikeCount: 0, Comments: []Comment{}, Tags: req.Tags, ImageURL: req.ImageURL,
+				ID:        time.Now().Format("20060102T150405.000000000"),
+				Author:    req.Author,
+				Text:      req.Text,
+				CreatedAt: nowISO(),
+				LikeCount: 0,
+				Comments:  []Comment{},
+				Tags:      req.Tags,
+				ImageURL:  req.ImageURL,
 			}
-			writeJSON(w, http.StatusOK, store.create(p))
+			created := store.create(p)
+			store.saveToFile(postsFile)
+			writeJSON(w, http.StatusOK, created)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -307,18 +373,24 @@ func main() {
 					return
 				}
 				p.Text, p.Tags, p.ImageURL = req.Text, req.Tags, req.ImageURL
-				writeJSON(w, http.StatusOK, store.updateAt(idx, p))
+				updated := store.updateAt(idx, p)
+				store.saveToFile(postsFile)
+				writeJSON(w, http.StatusOK, updated)
+
 			case http.MethodDelete:
 				p, idx := store.byID(id)
 				if idx < 0 {
 					http.Error(w, "not found", http.StatusNotFound)
 					return
 				}
+				// 順手刪掉實體圖片（若是我們保存的）
 				if p.ImageURL != nil && strings.HasPrefix(*p.ImageURL, "/uploads/") {
-					_ = os.Remove(filepath.Join(".", *p.ImageURL)) // best-effort
+					_ = os.Remove(filepath.Join(uploadsDir, filepath.Base(*p.ImageURL)))
 				}
 				store.deleteAt(idx)
+				store.saveToFile(postsFile)
 				writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+
 			default:
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
@@ -345,7 +417,10 @@ func main() {
 				p.LikedByMe = true
 				p.LikeCount++
 			}
-			writeJSON(w, http.StatusOK, store.updateAt(idx, p))
+			updated := store.updateAt(idx, p)
+			store.saveToFile(postsFile)
+			writeJSON(w, http.StatusOK, updated)
+
 		case "comments":
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -364,19 +439,26 @@ func main() {
 				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
-			p.Comments = append(p.Comments, Comment{ID: time.Now().Format("20060102T150405.000000000"), Author: req.Author, Text: req.Text, CreatedAt: nowISO()})
-			writeJSON(w, http.StatusOK, store.updateAt(idx, p))
+			p.Comments = append(p.Comments, Comment{
+				ID:        time.Now().Format("20060102T150405.000000000"),
+				Author:    req.Author,
+				Text:      req.Text,
+				CreatedAt: nowISO(),
+			})
+			updated := store.updateAt(idx, p)
+			store.saveToFile(postsFile)
+			writeJSON(w, http.StatusOK, updated)
+
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
-	// 讀埠（Render 會傳入 $PORT）
+	// 讀埠（Render 會輸入 $PORT）
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-
 	addr := ":" + port
 	log.Println("Server listening on", addr, "DATA_DIR=", dataDir)
 	if err := http.ListenAndServe(addr, cors(mux)); err != nil {

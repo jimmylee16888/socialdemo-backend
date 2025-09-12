@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -13,9 +14,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	firebase "firebase.google.com/go/v4"
+	"firebase.google.com/go/v4/auth"
+	"google.golang.org/api/option"
 )
 
+//
 // ======== Models ========
+//
 
 type User struct {
 	ID          string  `json:"id"`
@@ -42,12 +49,12 @@ type Post struct {
 	ImageURL  *string   `json:"imageUrl,omitempty"` // e.g. "/uploads/xxx.jpg"
 }
 
-// 供 /users/:id 與 /me 使用的公開/半公開資料
+// /users/:id 與 /me
 type Profile struct {
 	ID            string  `json:"id"`
-	Name          string  `json:"name"`      // 系統名稱
-	Nickname      *string `json:"nickname"`  // 顯示暱稱（可為空）
-	AvatarURL     *string `json:"avatarUrl"` // 可為相對路徑
+	Name          string  `json:"name"`
+	Nickname      *string `json:"nickname"`
+	AvatarURL     *string `json:"avatarUrl"`
 	Instagram     *string `json:"instagram"`
 	Facebook      *string `json:"facebook"`
 	LineId        *string `json:"lineId"`
@@ -56,22 +63,17 @@ type Profile struct {
 	ShowLine      bool    `json:"showLine"`
 }
 
+//
 // ======== Store + Persistence ========
+//
 
 type Store struct {
-	mu sync.RWMutex
-
-	// 帖文
-	posts []Post
-
-	// 追蹤標籤：userId -> tags (unique, lowercased for equality)
-	tags map[string][]string
-
-	// 好友/追蹤：userId -> set(friendId)
-	friends map[string]map[string]struct{}
-
-	// 使用者公開資料
-	profiles map[string]Profile
+	mu        sync.RWMutex
+	posts     []Post
+	tags      map[string][]string            // userId -> tags
+	friends   map[string]map[string]struct{} // userId -> set(friendId)
+	profiles  map[string]Profile             // userId -> profile
+	postLikes map[string]map[string]struct{} // postId -> set(uid)
 }
 
 func nowISO() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -83,8 +85,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
-
-// ----- File helpers -----
 
 func readJSONFile[T any](path string, out *T) error {
 	b, err := os.ReadFile(path)
@@ -102,8 +102,7 @@ func writeJSONFile(path string, v any) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
-func (s *Store) loadAll(postsFile, tagsFile, friendsFile, profilesFile string) {
-	// posts
+func (s *Store) loadAll(postsFile, tagsFile, friendsFile, profilesFile, likesFile string) {
 	_ = readJSONFile(postsFile, &s.posts)
 	if s.tags == nil {
 		s.tags = make(map[string][]string)
@@ -114,23 +113,31 @@ func (s *Store) loadAll(postsFile, tagsFile, friendsFile, profilesFile string) {
 	if s.profiles == nil {
 		s.profiles = make(map[string]Profile)
 	}
+	if s.postLikes == nil {
+		s.postLikes = make(map[string]map[string]struct{})
+	}
 	_ = readJSONFile(tagsFile, &s.tags)
 	_ = readJSONFile(friendsFile, &s.friends)
 	_ = readJSONFile(profilesFile, &s.profiles)
+	_ = readJSONFile(likesFile, &s.postLikes)
 }
 
 func (s *Store) savePosts(path string)    { _ = writeJSONFile(path, s.posts) }
 func (s *Store) saveTags(path string)     { _ = writeJSONFile(path, s.tags) }
 func (s *Store) saveFriends(path string)  { _ = writeJSONFile(path, s.friends) }
 func (s *Store) saveProfiles(path string) { _ = writeJSONFile(path, s.profiles) }
+func (s *Store) saveLikes(path string)    { _ = writeJSONFile(path, s.postLikes) }
 
-// ======== Posts in-memory ops ========
+//
+// ======== Posts ops ========
+//
 
-func (s *Store) list(tab string, tags []string) []Post {
+func (s *Store) list(tab string, tags []string, viewerUID string) []Post {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]Post, 0, len(s.posts))
 
+	// 篩選
+	var base []Post
 	if len(tags) > 0 {
 		tagset := map[string]struct{}{}
 		for _, t := range tags {
@@ -139,17 +146,34 @@ func (s *Store) list(tab string, tags []string) []Post {
 		for _, p := range s.posts {
 			for _, pt := range p.Tags {
 				if _, ok := tagset[strings.ToLower(pt)]; ok {
-					out = append(out, p)
+					base = append(base, p)
 					break
 				}
 			}
 		}
 	} else {
-		out = append(out, s.posts...)
+		base = append(base, s.posts...)
 	}
 
+	// 帶入 LikeCount / LikedByMe
+	out := make([]Post, 0, len(base))
+	for _, p := range base {
+		cp := p
+		set := s.postLikes[cp.ID]
+		cp.LikeCount = len(set)
+		_, liked := set[viewerUID]
+		cp.LikedByMe = liked
+		out = append(out, cp)
+	}
+
+	// 排序
 	if tab == "hot" {
-		sort.Slice(out, func(i, j int) bool { return out[i].LikeCount > out[j].LikeCount })
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].LikeCount == out[j].LikeCount {
+				return out[i].CreatedAt > out[j].CreatedAt
+			}
+			return out[i].LikeCount > out[j].LikeCount
+		})
 	} else {
 		sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
 	}
@@ -187,24 +211,29 @@ func (s *Store) deleteAt(i int) {
 	s.posts = append(s.posts[:i], s.posts[i+1:]...)
 }
 
-func (s *Store) userPosts(uid string) []Post {
+func (s *Store) userPosts(uid string, viewerUID string) []Post {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var out []Post
 	for _, p := range s.posts {
 		if p.Author.ID == uid {
-			out = append(out, p)
+			cp := p
+			set := s.postLikes[p.ID]
+			cp.LikeCount = len(set)
+			_, liked := set[viewerUID]
+			cp.LikedByMe = liked
+			out = append(out, cp)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
 	return out
 }
 
+//
 // ======== Tags helpers ========
+//
 
-func normalizeTag(t string) string {
-	return strings.TrimSpace(strings.ToLower(t))
-}
+func normalizeTag(t string) string { return strings.TrimSpace(strings.ToLower(t)) }
 
 func (s *Store) getTags(uid string) []string {
 	s.mu.RLock()
@@ -245,7 +274,9 @@ func (s *Store) removeTag(uid, tag string) []string {
 	return append([]string(nil), out...)
 }
 
+//
 // ======== Friends helpers ========
+//
 
 func (s *Store) getFriends(uid string) []string {
 	s.mu.RLock()
@@ -286,7 +317,9 @@ func (s *Store) unfollow(uid, target string) {
 	delete(m, target)
 }
 
+//
 // ======== Profiles helpers ========
+//
 
 func (s *Store) getProfile(uid string) (Profile, bool) {
 	s.mu.RLock()
@@ -301,7 +334,6 @@ func (s *Store) upsertProfile(p Profile) Profile {
 	if p.ID == "" {
 		return p
 	}
-	// 合併更新（僅覆蓋非零值）
 	ex, ok := s.profiles[p.ID]
 	if !ok {
 		s.profiles[p.ID] = p
@@ -325,7 +357,6 @@ func (s *Store) upsertProfile(p Profile) Profile {
 	if p.LineId != nil {
 		ex.LineId = p.LineId
 	}
-	// bool 有值時才有意義（零值 false 也可能是刻意）
 	ex.ShowInstagram = p.ShowInstagram
 	ex.ShowFacebook = p.ShowFacebook
 	ex.ShowLine = p.ShowLine
@@ -334,29 +365,162 @@ func (s *Store) upsertProfile(p Profile) Profile {
 	return ex
 }
 
+func (s *Store) displayName(uid string) string {
+	if p, ok := s.getProfile(uid); ok {
+		if p.Nickname != nil && *p.Nickname != "" {
+			return *p.Nickname
+		}
+		if p.Name != "" {
+			return p.Name
+		}
+	}
+	return uid
+}
+
+//
+// ======== Auth & App context ========
+//
+
+type AppCtx struct {
+	Store      *Store
+	AuthClient *auth.Client
+}
+
+type ctxKey string
+
+const uidKey ctxKey = "uid"
+
+func currentUID(r *http.Request) string {
+	if v := r.Context().Value(uidKey); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// 支援三種模式：
+// 1) 正式憑證：FIREBASE_PROJECT_ID + GOOGLE_APPLICATION_CREDENTIALS 或 FIREBASE_SERVICE_ACCOUNT_JSON
+// 2) Emulator：FIREBASE_PROJECT_ID + FIREBASE_AUTH_EMULATOR_HOST
+// 3) 免驗證：NO_AUTH=1（不初始 Firebase，用於本機或暫測）
+var noAuth = os.Getenv("NO_AUTH") == "1"
+
+func newAuthClient() *auth.Client {
+	if noAuth {
+		return nil // 不需要 Firebase
+	}
+
+	proj := os.Getenv("FIREBASE_PROJECT_ID")
+	if proj == "" {
+		log.Fatal("FIREBASE_PROJECT_ID not set")
+	}
+
+	var opts []option.ClientOption
+	// 首選：JSON 直接放在環境變數（最適合 Render Secrets）
+	if saJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON"); saJSON != "" {
+		opts = append(opts, option.WithCredentialsJSON([]byte(saJSON)))
+	} else if cred := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); cred != "" {
+		if _, err := os.Stat(cred); err != nil {
+			log.Fatalf("GOOGLE_APPLICATION_CREDENTIALS %q not readable: %v", cred, err)
+		}
+		opts = append(opts, option.WithCredentialsFile(cred))
+	} else if os.Getenv("FIREBASE_AUTH_EMULATOR_HOST") == "" {
+		log.Fatal("Missing credentials: set FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS (or use FIREBASE_AUTH_EMULATOR_HOST / NO_AUTH=1)")
+	}
+
+	app, err := firebase.NewApp(context.Background(), &firebase.Config{
+		ProjectID: proj,
+	}, opts...)
+	if err != nil {
+		log.Fatalf("firebase init: %v", err)
+	}
+	c, err := app.Auth(context.Background())
+	if err != nil {
+		log.Fatalf("firebase auth: %v", err)
+	}
+	return c
+}
+
+func withAuth(app *AppCtx, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if noAuth {
+			// 免驗證模式：允許用 Authorization: Debug <uid> 指定身分，預設 u_me
+			uid := "u_me"
+			if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Debug ") {
+				uid = strings.TrimSpace(strings.TrimPrefix(h, "Debug "))
+			}
+			ctx := context.WithValue(r.Context(), uidKey, uid)
+			next(w, r.WithContext(ctx))
+			return
+		}
+
+		authz := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authz, "Bearer ") {
+			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			return
+		}
+		idToken := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
+		token, err := app.AuthClient.VerifyIDToken(r.Context(), idToken)
+		if err != nil {
+			http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), uidKey, token.UID)
+		next(w, r.WithContext(ctx))
+	}
+}
+
+// 非強制驗證：若帶 token 則解析 viewerUID；免驗證模式允許 Debug <uid>
+func tryViewerUID(app *AppCtx, r *http.Request) string {
+	if noAuth {
+		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Debug ") {
+			return strings.TrimSpace(strings.TrimPrefix(h, "Debug "))
+		}
+		return ""
+	}
+	authz := r.Header.Get("Authorization")
+	if strings.HasPrefix(authz, "Bearer ") {
+		idToken := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
+		if tok, err := app.AuthClient.VerifyIDToken(r.Context(), idToken); err == nil {
+			return tok.UID
+		}
+	}
+	return ""
+}
+
+//
 // ======== main ========
+//
 
 func main() {
-	// 資料目錄
+	// Render 建議把 Persistent Disk 掛到指定路徑，並以 DATA_DIR 指向；否則預設 /data，若無法寫入可改用 os.TempDir()
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
+		// 若在 Render 沒掛磁碟，/data 可能不存在；備援用專案路徑或臨時路徑
 		dataDir = "/data"
+		if _, err := os.Stat(dataDir); err != nil {
+			dataDir = filepath.Join(".", "data")
+		}
 	}
 	uploadsDir := filepath.Join(dataDir, "uploads")
 	postsFile := filepath.Join(dataDir, "posts.json")
 	tagsFile := filepath.Join(dataDir, "tags.json")
 	friendsFile := filepath.Join(dataDir, "friends.json")
 	profilesFile := filepath.Join(dataDir, "profiles.json")
+	likesFile := filepath.Join(dataDir, "likes.json")
+
+	ensureDir(dataDir)
 	ensureDir(uploadsDir)
 
 	store := &Store{
-		tags:     map[string][]string{},
-		friends:  map[string]map[string]struct{}{},
-		profiles: map[string]Profile{},
+		tags:      map[string][]string{},
+		friends:   map[string]map[string]struct{}{},
+		profiles:  map[string]Profile{},
+		postLikes: map[string]map[string]struct{}{},
 	}
-	store.loadAll(postsFile, tagsFile, friendsFile, profilesFile)
+	store.loadAll(postsFile, tagsFile, friendsFile, profilesFile, likesFile)
 
-	// 首次啟動塞一些 demo 資料
+	// Demo 資料（首次啟動）
 	func() {
 		store.mu.RLock()
 		emptyPosts := len(store.posts) == 0
@@ -370,7 +534,8 @@ func main() {
 				Author:    User{ID: "u_bob", Name: "Bob"},
 				Text:      "今天把 UI 卡片邊角修好了 ✅",
 				CreatedAt: nowISO(),
-				LikeCount: 5,
+				LikeCount: 0,
+				LikedByMe: false,
 				Comments:  []Comment{},
 				Tags:      []string{"flutter", "design"},
 			})
@@ -379,7 +544,8 @@ func main() {
 				Author:    User{ID: "u_me", Name: "Me"},
 				Text:      "嗨！這是我的第一篇 🙂",
 				CreatedAt: nowISO(),
-				LikeCount: 1,
+				LikeCount: 0,
+				LikedByMe: false,
 				Comments:  []Comment{},
 				Tags:      []string{"hello"},
 			})
@@ -402,15 +568,17 @@ func main() {
 		}
 	}()
 
+	app := &AppCtx{Store: store, AuthClient: newAuthClient()}
+
 	mux := http.NewServeMux()
 
-	// 健康檢查
+	// 健康檢查（Render Health Check 可用）
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	// CORS（Flutter Web 也可用）
+	// CORS
 	cors := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -424,11 +592,11 @@ func main() {
 		})
 	}
 
-	// ---- 靜態檔案：/uploads/*
+	// 靜態：/uploads/*
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadsDir))))
 
-	// ---- 圖片上傳：POST /upload
-	mux.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
+	// 上傳：POST /upload（需登入）
+	mux.HandleFunc("/upload", withAuth(app, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -465,7 +633,9 @@ func main() {
 		case "image/gif":
 			ext = ".gif"
 		default:
-			if e := strings.ToLower(filepath.Ext(hdr.Filename)); map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}[e] {
+			if e := strings.ToLower(filepath.Ext(hdr.Filename)); map[string]bool{
+				".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true,
+			}[e] {
 				ext = e
 			}
 			if ext == "" {
@@ -508,49 +678,54 @@ func main() {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"url": "/uploads/" + filename})
-	})
+	}))
 
-	// ---- /posts：GET 列表、POST 建立
+	// /posts：GET（可匿名，若帶 token 計算 LikedByMe），POST（需登入）
 	mux.HandleFunc("/posts", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			viewer := tryViewerUID(app, r)
 			tab := r.URL.Query().Get("tab")
 			var tags []string
 			if t := r.URL.Query().Get("tags"); t != "" {
 				tags = strings.Split(t, ",")
 			}
-			writeJSON(w, http.StatusOK, store.list(tab, tags))
+			writeJSON(w, http.StatusOK, store.list(tab, tags, viewer))
 
 		case http.MethodPost:
-			var req struct {
-				Author   User     `json:"author"`
-				Text     string   `json:"text"`
-				Tags     []string `json:"tags"`
-				ImageURL *string  `json:"imageUrl,omitempty"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			p := Post{
-				ID:        time.Now().Format("20060102T150405.000000000"),
-				Author:    req.Author,
-				Text:      req.Text,
-				CreatedAt: nowISO(),
-				LikeCount: 0,
-				Comments:  []Comment{},
-				Tags:      req.Tags,
-				ImageURL:  req.ImageURL,
-			}
-			created := store.create(p)
-			store.savePosts(postsFile)
-			writeJSON(w, http.StatusOK, created)
+			withAuth(app, func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					Text     string   `json:"text"`
+					Tags     []string `json:"tags"`
+					ImageURL *string  `json:"imageUrl,omitempty"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				uid := currentUID(r)
+				p := Post{
+					ID:        time.Now().Format("20060102T150405.000000000"),
+					Author:    User{ID: uid, Name: store.displayName(uid)},
+					Text:      req.Text,
+					CreatedAt: nowISO(),
+					LikeCount: 0,
+					LikedByMe: false,
+					Comments:  []Comment{},
+					Tags:      req.Tags,
+					ImageURL:  req.ImageURL,
+				}
+				created := store.create(p)
+				store.savePosts(postsFile)
+				writeJSON(w, http.StatusOK, created)
+			})(w, r)
+
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 
-	// ---- /posts/{id}, /posts/{id}/like, /posts/{id}/comments
+	// /posts/{id}, /posts/{id}/like, /posts/{id}/comments
 	mux.HandleFunc("/posts/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/posts/")
 		if path == "" {
@@ -563,37 +738,49 @@ func main() {
 		if len(parts) == 1 {
 			switch r.Method {
 			case http.MethodPut:
-				var req struct {
-					Text     string   `json:"text"`
-					Tags     []string `json:"tags"`
-					ImageURL *string  `json:"imageUrl,omitempty"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-				p, idx := store.byID(id)
-				if idx < 0 {
-					http.Error(w, "not found", http.StatusNotFound)
-					return
-				}
-				p.Text, p.Tags, p.ImageURL = req.Text, req.Tags, req.ImageURL
-				updated := store.updateAt(idx, p)
-				store.savePosts(postsFile)
-				writeJSON(w, http.StatusOK, updated)
+				withAuth(app, func(w http.ResponseWriter, r *http.Request) {
+					var req struct {
+						Text     string   `json:"text"`
+						Tags     []string `json:"tags"`
+						ImageURL *string  `json:"imageUrl,omitempty"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+					p, idx := store.byID(id)
+					if idx < 0 {
+						http.Error(w, "not found", http.StatusNotFound)
+						return
+					}
+					if currentUID(r) != p.Author.ID {
+						http.Error(w, "forbidden", http.StatusForbidden)
+						return
+					}
+					p.Text, p.Tags, p.ImageURL = req.Text, req.Tags, req.ImageURL
+					updated := store.updateAt(idx, p)
+					store.savePosts(postsFile)
+					writeJSON(w, http.StatusOK, updated)
+				})(w, r)
 
 			case http.MethodDelete:
-				p, idx := store.byID(id)
-				if idx < 0 {
-					http.Error(w, "not found", http.StatusNotFound)
-					return
-				}
-				if p.ImageURL != nil && strings.HasPrefix(*p.ImageURL, "/uploads/") {
-					_ = os.Remove(filepath.Join(uploadsDir, filepath.Base(*p.ImageURL)))
-				}
-				store.deleteAt(idx)
-				store.savePosts(postsFile)
-				writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+				withAuth(app, func(w http.ResponseWriter, r *http.Request) {
+					p, idx := store.byID(id)
+					if idx < 0 {
+						http.Error(w, "not found", http.StatusNotFound)
+						return
+					}
+					if currentUID(r) != p.Author.ID {
+						http.Error(w, "forbidden", http.StatusForbidden)
+						return
+					}
+					if p.ImageURL != nil && strings.HasPrefix(*p.ImageURL, "/uploads/") {
+						_ = os.Remove(filepath.Join(uploadsDir, filepath.Base(*p.ImageURL)))
+					}
+					store.deleteAt(idx)
+					store.savePosts(postsFile)
+					writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+				})(w, r)
 
 			default:
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -603,101 +790,107 @@ func main() {
 
 		switch parts[1] {
 		case "like":
-			if r.Method != http.MethodPost {
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			p, idx := store.byID(id)
-			if idx < 0 {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
-			}
-			if p.LikedByMe {
-				p.LikedByMe = false
-				if p.LikeCount > 0 {
-					p.LikeCount--
+			withAuth(app, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+					return
 				}
-			} else {
-				p.LikedByMe = true
-				p.LikeCount++
-			}
-			updated := store.updateAt(idx, p)
-			store.savePosts(postsFile)
-			writeJSON(w, http.StatusOK, updated)
+				uid := currentUID(r)
+				p, idx := store.byID(id)
+				if idx < 0 {
+					http.Error(w, "not found", http.StatusNotFound)
+					return
+				}
+
+				store.mu.Lock()
+				set := store.postLikes[p.ID]
+				if set == nil {
+					set = make(map[string]struct{})
+				}
+				if _, ok := set[uid]; ok {
+					delete(set, uid)
+				} else {
+					set[uid] = struct{}{}
+				}
+				store.postLikes[p.ID] = set
+				// 更新回傳欄位
+				p.LikeCount = len(set)
+				_, liked := set[uid]
+				p.LikedByMe = liked
+				store.posts[idx] = p
+				store.mu.Unlock()
+
+				store.saveLikes(likesFile)
+				writeJSON(w, http.StatusOK, p)
+			})(w, r)
 
 		case "comments":
-			if r.Method != http.MethodPost {
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			var req struct {
-				Author User   `json:"author"`
-				Text   string `json:"text"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			p, idx := store.byID(id)
-			if idx < 0 {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
-			}
-			p.Comments = append(p.Comments, Comment{
-				ID:        time.Now().Format("20060102T150405.000000000"),
-				Author:    req.Author,
-				Text:      req.Text,
-				CreatedAt: nowISO(),
-			})
-			updated := store.updateAt(idx, p)
-			store.savePosts(postsFile)
-			writeJSON(w, http.StatusOK, updated)
+			withAuth(app, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+					return
+				}
+				var req struct {
+					Text string `json:"text"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				uid := currentUID(r)
+				p, idx := store.byID(id)
+				if idx < 0 {
+					http.Error(w, "not found", http.StatusNotFound)
+					return
+				}
+				p.Comments = append(p.Comments, Comment{
+					ID:        time.Now().Format("20060102T150405.000000000"),
+					Author:    User{ID: uid, Name: store.displayName(uid)},
+					Text:      req.Text,
+					CreatedAt: nowISO(),
+				})
+				updated := store.updateAt(idx, p)
+				store.savePosts(postsFile)
+				writeJSON(w, http.StatusOK, updated)
+			})(w, r)
 
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
-	// ---- /me：GET 讀自己的 Profile、PATCH 更新
-	//   透過 ?uid= 指定目前使用者（沒帶就用 "u_me"）
-	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
-		uid := r.URL.Query().Get("uid")
-		if uid == "" {
-			uid = "u_me"
-		}
+	// /me：GET 讀自己的 Profile、PATCH 更新（需登入）
+	mux.HandleFunc("/me", withAuth(app, func(w http.ResponseWriter, r *http.Request) {
+		uid := currentUID(r)
 		switch r.Method {
 		case http.MethodGet:
 			if p, ok := store.getProfile(uid); ok {
 				writeJSON(w, http.StatusOK, p)
 				return
 			}
-			http.Error(w, "not found", http.StatusNotFound)
+			writeJSON(w, http.StatusOK, Profile{ID: uid, Name: uid})
 		case http.MethodPatch:
 			var p Profile
 			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			// 忽略 body.id 若與 uid 不同，強制用 uid
-			p.ID = uid
+			p.ID = uid // 強制以 token 內的 uid 為準
 			updated := store.upsertProfile(p)
 			store.saveProfiles(profilesFile)
 			writeJSON(w, http.StatusOK, updated)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
+	}))
 
-	// ---- /me/tags：GET 取列表、POST 新增、DELETE /me/tags/{tag} 移除
-	mux.HandleFunc("/me/tags", func(w http.ResponseWriter, r *http.Request) {
+	// /me/tags：GET/POST，/me/tags/{tag}：DELETE（需登入）
+	mux.HandleFunc("/me/tags", withAuth(app, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/me/tags" {
 			http.NotFound(w, r)
 			return
 		}
-		uid := r.URL.Query().Get("uid")
-		if uid == "" {
-			uid = "u_me"
-		}
+		uid := currentUID(r)
 		switch r.Method {
 		case http.MethodGet:
 			writeJSON(w, http.StatusOK, store.getTags(uid))
@@ -715,17 +908,13 @@ func main() {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
-
-	mux.HandleFunc("/me/tags/", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("/me/tags/", withAuth(app, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		uid := r.URL.Query().Get("uid")
-		if uid == "" {
-			uid = "u_me"
-		}
+		uid := currentUID(r)
 		tag := strings.TrimPrefix(r.URL.Path, "/me/tags/")
 		if tag == "" {
 			http.NotFound(w, r)
@@ -734,22 +923,19 @@ func main() {
 		tags := store.removeTag(uid, tag)
 		store.saveTags(tagsFile)
 		writeJSON(w, http.StatusOK, tags)
-	})
+	}))
 
-	// ---- /me/friends：GET 我的好友 ID 列表
-	mux.HandleFunc("/me/friends", func(w http.ResponseWriter, r *http.Request) {
+	// /me/friends：GET 我的好友 ID 列表（需登入）
+	mux.HandleFunc("/me/friends", withAuth(app, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		uid := r.URL.Query().Get("uid")
-		if uid == "" {
-			uid = "u_me"
-		}
+		uid := currentUID(r)
 		writeJSON(w, http.StatusOK, store.getFriends(uid))
-	})
+	}))
 
-	// ---- /users/{id}、/users/{id}/follow、/users/{id}/posts
+	// /users/{id}（公開）、/users/{id}/posts（公開）、/users/{id}/follow（需登入）
 	mux.HandleFunc("/users/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/users/")
 		if rest == "" {
@@ -769,49 +955,47 @@ func main() {
 				writeJSON(w, http.StatusOK, p)
 				return
 			}
-			// 若沒有 profile，回傳最基本資訊
-			name := userId
-			writeJSON(w, http.StatusOK, Profile{ID: userId, Name: name})
+			writeJSON(w, http.StatusOK, Profile{ID: userId, Name: userId})
 			return
 		}
 
 		switch parts[1] {
 		case "follow":
-			uid := r.URL.Query().Get("uid")
-			if uid == "" {
-				uid = "u_me"
-			}
-			switch r.Method {
-			case http.MethodPost:
-				store.follow(uid, userId)
-				store.saveFriends(friendsFile)
-				w.WriteHeader(http.StatusNoContent)
-			case http.MethodDelete:
-				store.unfollow(uid, userId)
-				store.saveFriends(friendsFile)
-				w.WriteHeader(http.StatusNoContent)
-			default:
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			}
+			withAuth(app, func(w http.ResponseWriter, r *http.Request) {
+				uid := currentUID(r)
+				switch r.Method {
+				case http.MethodPost:
+					store.follow(uid, userId)
+					store.saveFriends(friendsFile)
+					w.WriteHeader(http.StatusNoContent)
+				case http.MethodDelete:
+					store.unfollow(uid, userId)
+					store.saveFriends(friendsFile)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+			})(w, r)
 		case "posts":
-			// GET /users/{id}/posts
+			// GET /users/{id}/posts（可匿名，若帶 token 計算 LikedByMe）
 			if r.Method != http.MethodGet {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			writeJSON(w, http.StatusOK, store.userPosts(userId))
+			viewer := tryViewerUID(app, r)
+			writeJSON(w, http.StatusOK, store.userPosts(userId, viewer))
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
-	// ---- Start server ----
-	port := os.Getenv("PORT")
+	// Start
+	port := os.Getenv("PORT") // Render 會注入 PORT
 	if port == "" {
 		port = "8088"
 	}
 	addr := ":" + port
-	log.Println("Server listening on", addr, "DATA_DIR=", dataDir)
+	log.Println("Server listening on", addr, "DATA_DIR=", dataDir, "NO_AUTH=", noAuth)
 	if err := http.ListenAndServe(addr, cors(mux)); err != nil {
 		log.Fatal(err)
 	}

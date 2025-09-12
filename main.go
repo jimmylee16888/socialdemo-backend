@@ -132,6 +132,19 @@ func (s *Store) saveLikes(path string)    { _ = writeJSONFile(path, s.postLikes)
 // ======== Posts ops ========
 //
 
+// decorate：用最新暱稱覆蓋作者名字，並計算 LikeCount/LikedByMe
+func (s *Store) decorate(p Post, viewerUID string) Post {
+	cp := p
+	if cp.Author.ID != "" {
+		cp.Author.Name = s.displayName(cp.Author.ID)
+	}
+	set := s.postLikes[cp.ID]
+	cp.LikeCount = len(set)
+	_, liked := set[viewerUID]
+	cp.LikedByMe = liked
+	return cp
+}
+
 func (s *Store) list(tab string, tags []string, viewerUID string) []Post {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -155,15 +168,10 @@ func (s *Store) list(tab string, tags []string, viewerUID string) []Post {
 		base = append(base, s.posts...)
 	}
 
-	// 帶入 LikeCount / LikedByMe
+	// 帶入 LikeCount / LikedByMe / 最新暱稱
 	out := make([]Post, 0, len(base))
 	for _, p := range base {
-		cp := p
-		set := s.postLikes[cp.ID]
-		cp.LikeCount = len(set)
-		_, liked := set[viewerUID]
-		cp.LikedByMe = liked
-		out = append(out, cp)
+		out = append(out, s.decorate(p, viewerUID))
 	}
 
 	// 排序
@@ -217,12 +225,7 @@ func (s *Store) userPosts(uid string, viewerUID string) []Post {
 	var out []Post
 	for _, p := range s.posts {
 		if p.Author.ID == uid {
-			cp := p
-			set := s.postLikes[p.ID]
-			cp.LikeCount = len(set)
-			_, liked := set[viewerUID]
-			cp.LikedByMe = liked
-			out = append(out, cp)
+			out = append(out, s.decorate(p, viewerUID))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
@@ -717,7 +720,7 @@ func main() {
 				}
 				created := store.create(p)
 				store.savePosts(postsFile)
-				writeJSON(w, http.StatusOK, created)
+				writeJSON(w, http.StatusOK, store.decorate(created, uid)) // ★ decorate
 			})(w, r)
 
 		default:
@@ -760,7 +763,7 @@ func main() {
 					p.Text, p.Tags, p.ImageURL = req.Text, req.Tags, req.ImageURL
 					updated := store.updateAt(idx, p)
 					store.savePosts(postsFile)
-					writeJSON(w, http.StatusOK, updated)
+					writeJSON(w, http.StatusOK, store.decorate(updated, currentUID(r))) // ★
 				})(w, r)
 
 			case http.MethodDelete:
@@ -821,7 +824,7 @@ func main() {
 				store.mu.Unlock()
 
 				store.saveLikes(likesFile)
-				writeJSON(w, http.StatusOK, p)
+				writeJSON(w, http.StatusOK, store.decorate(p, uid)) // ★
 			})(w, r)
 
 		case "comments":
@@ -851,7 +854,7 @@ func main() {
 				})
 				updated := store.updateAt(idx, p)
 				store.savePosts(postsFile)
-				writeJSON(w, http.StatusOK, updated)
+				writeJSON(w, http.StatusOK, store.decorate(updated, uid)) // ★
 			})(w, r)
 
 		default:

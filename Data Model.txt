@@ -1,0 +1,36 @@
+資料模型（Data Model）
+
+Post（貼文）
+{
+  "id": "p1",
+  "author": { "id": "u_bob", "name": "Bob", "avatarAsset": null },
+  "text": "Hello",
+  "createdAt": "2025-01-01T00:00:00Z",
+  "likeCount": 3,
+  "likedByMe": true,
+  "comments": [
+    {
+      "id": "c1",
+      "author": { "id": "u_me", "name": "Me" },
+      "text": "Nice!",
+      "createdAt": "2025-01-01T00:01:00Z"
+    }
+  ],
+  "tags": ["flutter", "design"],
+  "imageUrl": "/uploads/xxx.jpg"
+}
+
+Profile（個人檔案）
+{
+  "id": "u_me",
+  "name": "Me",
+  "nickname": "Jenny",
+  "avatarUrl": "https://.../uploads/ava.jpg",
+  "instagram": "@jenny",
+  "facebook": "fb.me/jenny",
+  "lineId": "jenny_line",
+  "showInstagram": true,
+  "showFacebook": false,
+  "showLine": true
+}
+

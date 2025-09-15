@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Social Admin | 貼文管理</title>
+<style>
+  :root { --bg:#0b0d10; --card:#141820; --muted:#8b95a7; --text:#e6edf3; --primary:#4ea1ff; --danger:#ff6b6b; }
+  *{box-sizing:border-box} body{margin:0;font:14px/1.6 ui-sans-serif,system-ui,Segoe UI,Roboto;color:var(--text);background:linear-gradient(180deg,#0a0c10,#0e1218);}
+  header{position:sticky;top:0;z-index:10;background:#0d1117cc;backdrop-filter:saturate(1.2) blur(6px);border-bottom:1px solid #232a36;}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input,select,button,textarea{border:1px solid #263141;background:#0f141c;color:var(--text);padding:8px 10px;border-radius:10px}
+  button{cursor:pointer}
+  button.primary{background:var(--primary);border-color:#3a8be6;color:#071019}
+  button.ghost{background:transparent;border-color:#2b3648}
+  button.danger{background:var(--danger);border-color:#e25858;color:#2a0c0c}
+  .tabs button{padding:8px 12px;border-radius:999px}
+  .tabs .active{background:#1b2535;border-color:#2b3952}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}
+  @media(min-width:860px){.grid{grid-template-columns:1fr 1fr}}
+  .card{background:var(--card);border:1px solid #212a37;border-radius:16px;overflow:hidden}
+  .card .hd{display:flex;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px dashed #263141}
+  .card .bd{padding:12px}
+  .chip{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid #2b3648;color:#b8c2d3;margin-right:6px}
+  .muted{color:var(--muted)}
+  .row-right{margin-left:auto;display:flex;gap:6px}
+  .mt8{margin-top:8px}.mt12{margin-top:12px}.mt16{margin-top:16px}
+  .img{border-radius:12px;max-width:100%;height:auto;border:1px solid #263141}
+  details{background:#0e141c;border:1px solid #1f2733;border-radius:12px;padding:8px 10px}
+  summary{cursor:pointer}
+  .footer{padding:20px 0;color:#718096}
+  .k{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0c1017;border:1px solid #1f2a3c;padding:2px 6px;border-radius:6px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="row">
+      <strong>貼文管理面板</strong>
+      <div class="row-right">
+        <label>API Base
+          <input id="base" placeholder="http://localhost:8088" style="width:220px">
+        </label>
+        <label>Auth
+          <select id="authMode">
+            <option value="debug">Debug UID</option>
+            <option value="bearer">Bearer Token</option>
+          </select>
+        </label>
+        <input id="debugUid" placeholder="u_me / u_bob …" style="width:140px">
+        <input id="bearer" placeholder="eyJhbGciOi…" style="width:260px;display:none">
+        <button class="primary" id="saveCfg">儲存設定</button>
+      </div>
+    </div>
+    <div class="row mt8">
+      <div class="tabs" role="tablist">
+        <button id="tabFriends" data-tab="friends" class="active">好友</button>
+        <button id="tabHot" data-tab="hot">熱門</button>
+        <button id="tabFollowing" data-tab="following">追蹤</button>
+      </div>
+      <input id="tags" placeholder="逗號分隔的標籤，如 flutter,design" style="min-width:280px">
+      <button id="btnReload" class="ghost">重新整理</button>
+      <button id="btnNew" class="primary">新增貼文</button>
+      <button id="btnAdminReload" class="ghost" title="POST /admin/reload（若有開）">重載檔案 → 記憶體</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="grid" class="grid"></div>
+  <div class="footer">提示：NO_AUTH=1 模式下，請在 Auth 選擇 <span class="k">Debug UID</span>；正式上線選 <span class="k">Bearer</span> 放入 Firebase ID Token。</div>
+</main>
+
+<!-- 新增/編輯 dialog -->
+<dialog id="dlg" style="border:none;border-radius:16px;padding:0;background:#0e141a;color:#e6edf3">
+  <form method="dialog" style="padding:16px;min-width:320px;width:min(560px,90vw)">
+    <h3 id="dlgTitle">新增貼文</h3>
+    <label>文字<textarea id="fText" rows="4" style="width:100%"></textarea></label>
+    <div class="mt8"></div>
+    <label>標籤（逗號分隔）<input id="fTags" style="width:100%"></label>
+    <div class="mt8"></div>
+    <label>圖片 <input id="fImg" type="file" accept=".jpg,.jpeg,.png,.webp,.gif"></label>
+    <div class="mt12 row">
+      <button value="cancel" class="ghost">取消</button>
+      <div class="row-right">
+        <button id="btnDel" type="button" class="danger" style="display:none">刪除</button>
+        <button id="btnSubmit" class="primary">送出</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const $ = (q)=>document.querySelector(q);
+const state = {
+  tab: 'friends',
+  editing: null, // post or null
+};
+
+function loadCfg() {
+  $('#base').value = localStorage.getItem('adm.base') || (location.origin.includes('http') ? location.origin : 'http://localhost:8088');
+  const mode = localStorage.getItem('adm.mode') || 'debug';
+  $('#authMode').value = mode;
+  $('#debugUid').value = localStorage.getItem('adm.debugUid') || 'u_me';
+  $('#bearer').value = localStorage.getItem('adm.bearer') || '';
+  $('#bearer').style.display = mode==='bearer' ? 'inline-block' : 'none';
+  $('#debugUid').style.display = mode==='debug' ? 'inline-block' : 'none';
+}
+function saveCfg() {
+  localStorage.setItem('adm.base', $('#base').value.trim());
+  localStorage.setItem('adm.mode', $('#authMode').value);
+  localStorage.setItem('adm.debugUid', $('#debugUid').value.trim());
+  localStorage.setItem('adm.bearer', $('#bearer').value.trim());
+  alert('已儲存設定');
+}
+
+function authHeaders() {
+  const mode = $('#authMode').value;
+  if (mode === 'bearer') {
+    const t = $('#bearer').value.trim();
+    return t ? { 'Authorization': 'Bearer ' + t } : {};
+  } else {
+    const uid = $('#debugUid').value.trim() || 'u_me';
+    return { 'Authorization': 'Debug ' + uid };
+  }
+}
+
+async function api(path, opt={}) {
+  const base = $('#base').value.replace(/\/+$/,'');
+  const headers = Object.assign({'Accept':'application/json'}, authHeaders(), opt.headers||{});
+  const res = await fetch(base + path, Object.assign({}, opt, {headers}));
+  if (!res.ok) {
+    const text = await res.text().catch(()=>res.statusText);
+    throw new Error(res.status + ' ' + text);
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return res.text();
+}
+
+function fmtTime(iso) {
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+function toTagsString(tags) { return (tags||[]).join(','); }
+function parseTags(str) { return str.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean); }
+
+async function loadPosts() {
+  $('#grid').innerHTML = '載入中…';
+  const tags = $('#tags').value.trim();
+  const q = new URLSearchParams({ tab: state.tab });
+  if (tags) q.set('tags', tags);
+  const data = await api('/posts?' + q.toString());
+  renderPosts(data);
+}
+
+function renderPosts(list) {
+  const grid = $('#grid');
+  grid.innerHTML = '';
+  if (!list.length) {
+    grid.innerHTML = '<div class="muted">沒有資料</div>';
+    return;
+  }
+  for (const p of list) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="hd">
+        <div><strong>${escapeHTML(p.author?.name||'')}</strong> <span class="muted">· ${fmtTime(p.createdAt)}</span></div>
+        <div class="row-right">
+          <button class="ghost" data-act="like">❤ ${p.likeCount||0}${p.likedByMe?'（你讚過）':''}</button>
+          <button class="ghost" data-act="comment">留言</button>
+          <button class="ghost" data-act="edit">編輯</button>
+        </div>
+      </div>
+      <div class="bd">
+        <div>${escapeHTML(p.text||'')}</div>
+        ${p.tags?.length? `<div class="mt8">${p.tags.map(t=>`<span class="chip">#${escapeHTML(t)}</span>`).join('')}</div>`:''}
+        ${p.imageUrl? `<div class="mt12"><img class="img" src="${imgAbs(p.imageUrl)}" alt=""></div>`:''}
+      </div>
+    `;
+    card.querySelector('[data-act="edit"]').onclick = ()=>openEditor(p);
+    card.querySelector('[data-act="like"]').onclick = ()=>toggleLike(p);
+    card.querySelector('[data-act="comment"]').onclick = ()=>addComment(p);
+    grid.appendChild(card);
+  }
+}
+function imgAbs(url){
+  if (/^https?:\/\//i.test(url)) return url;
+  return $('#base').value.replace(/\/+$/,'') + (url.startsWith('/')? url : '/'+url);
+}
+function escapeHTML(s){return (s||'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]))}
+
+function setActiveTab(btn) {
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  state.tab = btn.dataset.tab;
+}
+
+$('#tabFriends').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
+$('#tabHot').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
+$('#tabFollowing').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
+$('#btnReload').onclick = loadPosts;
+$('#btnNew').onclick = ()=>openEditor(null);
+$('#btnAdminReload').onclick = async ()=>{
+  try {
+    await api('/admin/reload', { method:'POST' });
+    alert('已重載檔案 → 記憶體');
+    loadPosts();
+  } catch (e) { alert('呼叫 /admin/reload 失敗：' + e.message); }
+};
+
+$('#saveCfg').onclick = saveCfg;
+$('#authMode').onchange = ()=>{
+  const m = $('#authMode').value;
+  $('#bearer').style.display = m==='bearer' ? 'inline-block' : 'none';
+  $('#debugUid').style.display = m==='debug' ? 'inline-block' : 'none';
+};
+
+function openEditor(post){
+  state.editing = post;
+  $('#dlgTitle').textContent = post? '編輯貼文' : '新增貼文';
+  $('#fText').value = post?.text || '';
+  $('#fTags').value = post? (post.tags||[]).join(',') : '';
+  $('#fImg').value = '';
+  $('#btnDel').style.display = post? 'inline-block' : 'none';
+  $('#btnSubmit').onclick = submitEditor;
+  $('#btnDel').onclick = async ()=>{
+    if(!confirm('確定要刪除？')) return;
+    await api('/posts/'+post.id, { method:'DELETE' });
+    $('#dlg').close(); loadPosts();
+  };
+  $('#dlg').showModal();
+}
+async function submitEditor(ev){
+  ev.preventDefault();
+  const isEdit = !!state.editing;
+  const text = $('#fText').value.trim();
+  const tags = parseTags($('#fTags').value);
+  let imageUrl = state.editing?.imageUrl || null;
+
+  // 若選了新檔 → 先上傳 /upload
+  const file = $('#fImg').files[0];
+  if (file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const base = $('#base').value.replace(/\/+$/,'');
+    const res = await fetch(base + '/upload', { method:'POST', headers: authHeaders(), body: fd });
+    if (!res.ok) {
+      alert('上傳失敗：' + await res.text()); return;
+    }
+    const j = await res.json();
+    imageUrl = j.url; // 伺服器回 /uploads/xxx
+  }
+
+  if (isEdit) {
+    await api('/posts/'+state.editing.id, {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text, tags, imageUrl }),
+    });
+  } else {
+    await api('/posts', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text, tags, imageUrl }),
+    });
+  }
+  $('#dlg').close(); loadPosts();
+}
+
+async function toggleLike(p){
+  await api('/posts/'+p.id+'/like', { method:'POST' });
+  loadPosts();
+}
+async function addComment(p){
+  const t = prompt('輸入留言內容：');
+  if (!t) return;
+  await api('/posts/'+p.id+'/comments', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ text: t })
+  });
+  loadPosts();
+}
+
+// init
+loadCfg();
+loadPosts();
+</script>
+</body>
+</html>

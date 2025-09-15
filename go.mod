@@ -1,5 +1,6 @@
-module socialdemo
+module local.dev/socialdemo-backend
 
+// 或 module github.com/jimmypflee/socialdemo-backend
 go 1.24.0
 
 toolchain go1.24.3

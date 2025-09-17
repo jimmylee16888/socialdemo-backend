@@ -1,11 +1,14 @@
+// internal/httpx/middleware.go
 package httpx
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
+	"time"
 
 	"firebase.google.com/go/v4/auth"
 	"local.dev/socialdemo-backend/internal/config"
@@ -31,18 +34,50 @@ func currentUID(r *http.Request) string {
 	return ""
 }
 
+// ---- 新增：在 NO_AUTH 時給一個穩定的 Cookie UID ----
+const devUIDCookie = "DEV_UID"
+
+func genDevUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return "dev_" + hex.EncodeToString(b[:])
+}
+
+func devUIDFromCookie(w http.ResponseWriter, r *http.Request) string {
+	if c, err := r.Cookie(devUIDCookie); err == nil && c.Value != "" {
+		return c.Value
+	}
+	id := genDevUID()
+	http.SetCookie(w, &http.Cookie{
+		Name:     devUIDCookie,
+		Value:    id,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(365 * 24 * time.Hour),
+	})
+	return id
+}
+
 func WithAuth(app *AppCtx, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// NO_AUTH=1：允許 Debug 與 Cookie UID
 		if config.NoAuth() {
-			// 免驗證：Authorization: Debug <uid>
-			uid := "u_me"
+			uid := ""
+			// 1) Authorization: Debug <uid-or-email>
 			if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Debug ") {
 				uid = strings.TrimSpace(strings.TrimPrefix(h, "Debug "))
+			}
+			// 2) 沒有 Debug → 用 Cookie（每個瀏覽器穩定唯一）
+			if uid == "" {
+				uid = devUIDFromCookie(w, r)
 			}
 			ctx := context.WithValue(r.Context(), uidKey, uid)
 			next(w, r.WithContext(ctx))
 			return
 		}
+
+		// 正式模式：必須 Bearer <Firebase IdToken>
 		authz := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authz, "Bearer ") {
 			http.Error(w, "missing bearer token", http.StatusUnauthorized)
@@ -59,16 +94,20 @@ func WithAuth(app *AppCtx, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// 非強制驗證：若帶 token 就解析 viewer；NO_AUTH=1 可用 Debug <uid>
+// 非強制驗證：拿來決定 LikedByMe 等 viewer 身分
 func tryViewerUID(app *AppCtx, r *http.Request) string {
 	if config.NoAuth() {
 		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Debug ") {
 			return strings.TrimSpace(strings.TrimPrefix(h, "Debug "))
 		}
+		// 與 WithAuth 一致：用 Cookie 當 viewer
+		if c, err := r.Cookie(devUIDCookie); err == nil && c.Value != "" {
+			return c.Value
+		}
 		return ""
 	}
 	authz := r.Header.Get("Authorization")
-	if strings.HasPrefix(authz, "Bearer ") {
+	if strings.HasPrefix(authz, "Bearer ") && app.AuthClient != nil {
 		idToken := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
 		if tok, err := app.AuthClient.VerifyIDToken(r.Context(), idToken); err == nil {
 			return tok.UID
@@ -77,9 +116,8 @@ func tryViewerUID(app *AppCtx, r *http.Request) string {
 	return ""
 }
 
-// CORS
 func CORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wrap := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -89,16 +127,7 @@ func CORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// 僅保護性刪檔（上傳在本機時）
-func removeUploadIfLocal(path string) {
-	if path == "" {
-		return
-	}
-	if strings.HasPrefix(path, "/uploads/") {
-		_ = os.Remove(strings.TrimPrefix(path, "/"))
-	}
+	return wrap
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

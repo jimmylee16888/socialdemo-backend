@@ -79,14 +79,14 @@ func (s *Store) SaveLikes(path string)    { _ = writeJSONFile(path, s.postLikes)
 func (s *Store) SeedIfEmpty(postsFile string) {
 	s.mu.RLock()
 	empty := len(s.posts) == 0
-	_, hasMe := s.profiles["u_me"]
-	_, hasBob := s.profiles["u_bob"]
+	_, hasAlice := s.profiles["demo_alice"]
+	_, hasBob := s.profiles["demo_bob"]
 	s.mu.RUnlock()
 
 	if empty {
 		s.Create(models.Post{
 			ID:        "p1",
-			Author:    models.User{ID: "u_bob", Name: "Bob"},
+			Author:    models.User{ID: "demo_bob", Name: "Bob"},
 			Text:      "今天把 UI 卡片邊角修好了 ✅",
 			CreatedAt: nowISO(),
 			Comments:  []models.Comment{},
@@ -94,7 +94,7 @@ func (s *Store) SeedIfEmpty(postsFile string) {
 		})
 		s.Create(models.Post{
 			ID:        "p2",
-			Author:    models.User{ID: "u_me", Name: "Me"},
+			Author:    models.User{ID: "demo_alice", Name: "Alice"},
 			Text:      "嗨！這是我的第一篇 🙂",
 			CreatedAt: nowISO(),
 			Comments:  []models.Comment{},
@@ -102,15 +102,16 @@ func (s *Store) SeedIfEmpty(postsFile string) {
 		})
 		s.SavePosts(postsFile)
 	}
-	if !hasMe {
-		nick := "Me"
-		s.UpsertProfile(models.Profile{ID: "u_me", Name: "Me", Nickname: &nick})
+
+	if !hasAlice {
+		nick := "Alice"
+		s.UpsertProfile(models.Profile{ID: "demo_alice", Name: "Alice", Nickname: &nick})
 	}
 	if !hasBob {
 		nick := "Bob"
 		insta := "@bob_dev"
 		s.UpsertProfile(models.Profile{
-			ID:            "u_bob",
+			ID:            "demo_bob",
 			Name:          "Bob",
 			Nickname:      &nick,
 			Instagram:     &insta,

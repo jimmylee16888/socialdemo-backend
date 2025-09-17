@@ -1,15 +1,39 @@
 [
   {
+    "id": "20250917T152528.330492500",
+    "author": {
+      "id": "jimmylee16888@gmail.com",
+      "name": "Jimmy Lee"
+    },
+    "text": "",
+    "createdAt": "2025-09-17T07:25:28Z",
+    "likeCount": 0,
+    "likedByMe": false,
+    "comments": [],
+    "tags": [],
+    "imageUrl": "/uploads/20250917T152527.921_scaled_35.jpg"
+  },
+  {
     "id": "p2",
     "author": {
       "id": "demo_alice",
       "name": "Alice"
     },
     "text": "嗨！這是我的第一篇 🙂",
-    "createdAt": "2025-09-17T03:45:31Z",
+    "createdAt": "2025-09-17T07:15:46Z",
     "likeCount": 0,
     "likedByMe": false,
-    "comments": [],
+    "comments": [
+      {
+        "id": "20250917T152541.329112300",
+        "author": {
+          "id": "jimmylee16888@gmail.com",
+          "name": "Jimmy Lee"
+        },
+        "text": "hi",
+        "createdAt": "2025-09-17T07:25:41Z"
+      }
+    ],
     "tags": [
       "hello"
     ]
@@ -21,7 +45,7 @@
       "name": "Bob"
     },
     "text": "今天把 UI 卡片邊角修好了 ✅",
-    "createdAt": "2025-09-17T03:45:31Z",
+    "createdAt": "2025-09-17T07:15:46Z",
     "likeCount": 0,
     "likedByMe": false,
     "comments": [],

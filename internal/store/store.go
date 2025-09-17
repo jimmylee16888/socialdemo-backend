@@ -17,7 +17,7 @@ type Store struct {
 	posts     []models.Post
 	tags      map[string][]string            // userId -> tags
 	friends   map[string]map[string]struct{} // userId -> set(friendId)
-	profiles  map[string]models.Profile      // userId -> profile
+	profiles  map[string]models.Profile      // userId -> profile (定義在 profile.go 的 Get/Upsert 使用)
 	postLikes map[string]map[string]struct{} // postId -> set(uid)
 }
 
@@ -103,6 +103,7 @@ func (s *Store) SeedIfEmpty(postsFile string) {
 		s.SavePosts(postsFile)
 	}
 
+	// Profile 的 Upsert / Get 在 profile.go，這裡只呼叫
 	if !hasAlice {
 		nick := "Alice"
 		s.UpsertProfile(models.Profile{ID: "demo_alice", Name: "Alice", Nickname: &nick})
@@ -120,7 +121,7 @@ func (s *Store) SeedIfEmpty(postsFile string) {
 	}
 }
 
-// ===== 公開：顯示名稱 / 裝飾（計算 LikeCount / LikedByMe） =====
+// ===== 顯示名稱（由 Profile 統一） + 裝飾（LikeCount/LikedByMe、留言作者名也一致）=====
 
 func (s *Store) DisplayName(uid string) string {
 	s.mu.RLock()
@@ -138,9 +139,20 @@ func (s *Store) DisplayName(uid string) string {
 
 func (s *Store) Decorate(p models.Post, viewerUID string) models.Post {
 	cp := p
+
+	// 作者顯示名
 	if cp.Author.ID != "" {
 		cp.Author.Name = s.DisplayName(cp.Author.ID)
 	}
+
+	// 留言作者顯示名一致化
+	for i := range cp.Comments {
+		if cp.Comments[i].Author.ID != "" {
+			cp.Comments[i].Author.Name = s.DisplayName(cp.Comments[i].Author.ID)
+		}
+	}
+
+	// Like 累計 / 是否由我按讚
 	s.mu.RLock()
 	set := s.postLikes[cp.ID]
 	s.mu.RUnlock()

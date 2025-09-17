@@ -25,6 +25,7 @@ func HandlePosts(app *AppCtx) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, app.Store.List(tab, tags, viewer))
 
 		case http.MethodPost:
+			// 建立貼文：作者=token 身分；前端不需也不能指定作者/暱稱
 			WithAuth(app, func(w http.ResponseWriter, r *http.Request) {
 				var req struct {
 					Text     string   `json:"text"`
@@ -86,7 +87,7 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 						http.Error(w, "not found", http.StatusNotFound)
 						return
 					}
-					// 僅作者本人（或管理員）可編輯
+					// 只有作者本人(或管理員)可編輯
 					if currentUID(r) != p.Author.ID && !isAdmin(app, r) {
 						http.Error(w, "forbidden", http.StatusForbidden)
 						return
@@ -104,7 +105,7 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 						http.Error(w, "not found", http.StatusNotFound)
 						return
 					}
-					// ✅ 允許作者本人（或管理員）刪除
+					// 只有作者本人(或管理員)可刪除
 					if currentUID(r) != p.Author.ID && !isAdmin(app, r) {
 						http.Error(w, "forbidden", http.StatusForbidden)
 						return
@@ -178,5 +179,5 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 	}
 }
 
-// --- 管理員判斷（目前預設關閉；僅作者可刪）。之後要開放可在這裡實作 ---
+// --- 管理員判斷（目前預設關閉；僅作者可刪/改）。之後要開放可在這裡實作 ---
 func isAdmin(_ *AppCtx, _ *http.Request) bool { return false }

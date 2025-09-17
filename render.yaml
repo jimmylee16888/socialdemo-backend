@@ -21,5 +21,5 @@ services:
 
       # 測試時才用；正式請移除或設 "0"
       - key: NO_AUTH
-        value: "1"
-        # value: "0"
+        # value: "1"
+        value: "0"

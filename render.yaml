@@ -7,19 +7,12 @@ services:
     dockerfilePath: ./Dockerfile
     autoDeploy: true
     healthCheckPath: /healthz
-
     envVars:
-      - key: FIREBASE_PROJECT_ID
-        value: pop-card-bf635
-
-      - key: FIREBASE_SERVICE_ACCOUNT_JSON
-        fromSecret: firebase-sa
-
-      # 用暫存資料夾（可用 /data 或 /tmp/socialdemo）
       - key: DATA_DIR
         value: /data
-
-      # 測試時才用；正式請移除或設 "0"
-      - key: NO_AUTH
+      - key: NO_AUTH        # 先用免登入確認功能
         value: "1"
-        # value: "0"
+      - key: FIREBASE_PROJECT_ID
+        value: pop-card-bf635
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        fromSecret: firebase-sa   # 這個 Secret 內容必須是整份 SA JSON

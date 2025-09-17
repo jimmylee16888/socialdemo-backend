@@ -1,4 +1,3 @@
-// internal/httpx/handlers_admin.go
 package httpx
 
 import "net/http"

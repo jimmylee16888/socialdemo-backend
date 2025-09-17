@@ -1,0 +1,33 @@
+[
+  {
+    "id": "p2",
+    "author": {
+      "id": "demo_alice",
+      "name": "Alice"
+    },
+    "text": "嗨！這是我的第一篇 🙂",
+    "createdAt": "2025-09-17T03:45:31Z",
+    "likeCount": 0,
+    "likedByMe": false,
+    "comments": [],
+    "tags": [
+      "hello"
+    ]
+  },
+  {
+    "id": "p1",
+    "author": {
+      "id": "demo_bob",
+      "name": "Bob"
+    },
+    "text": "今天把 UI 卡片邊角修好了 ✅",
+    "createdAt": "2025-09-17T03:45:31Z",
+    "likeCount": 0,
+    "likedByMe": false,
+    "comments": [],
+    "tags": [
+      "flutter",
+      "design"
+    ]
+  }
+]

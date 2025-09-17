@@ -1,11 +1,12 @@
-// internal/httpx/middleware.go
 package httpx
 
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -34,7 +35,7 @@ func currentUID(r *http.Request) string {
 	return ""
 }
 
-// ---- 新增：在 NO_AUTH 時給一個穩定的 Cookie UID ----
+// ---- 在 NO_AUTH 模式：Cookie 做為最後保底（每個瀏覽器一把固定 dev_...）----
 const devUIDCookie = "DEV_UID"
 
 func genDevUID() string {
@@ -59,16 +60,54 @@ func devUIDFromCookie(w http.ResponseWriter, r *http.Request) string {
 	return id
 }
 
+// ---- 在 NO_AUTH 模式：允許 Bearer，僅解 JWT payload 取出 email/uid（*不驗簽*）----
+func devUIDFromBearer(authz string) string {
+	raw := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
+	parts := strings.Split(raw, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return ""
+	}
+	get := func(k string) string {
+		if v, ok := m[k]; ok && v != nil {
+			return strings.TrimSpace(fmt.Sprintf("%v", v))
+		}
+		return ""
+	}
+	if e := get("email"); e != "" {
+		return e
+	}
+	if u := get("user_id"); u != "" {
+		return u
+	}
+	if u := get("uid"); u != "" {
+		return u
+	}
+	if s := get("sub"); s != "" {
+		return s
+	}
+	return ""
+}
+
 func WithAuth(app *AppCtx, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// NO_AUTH=1：允許 Debug 與 Cookie UID
+		// 免驗證模式：優先 Debug，其次 Bearer（解析 payload），最後用 Cookie
 		if config.NoAuth() {
-			uid := ""
-			// 1) Authorization: Debug <uid-or-email>
-			if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Debug ") {
-				uid = strings.TrimSpace(strings.TrimPrefix(h, "Debug "))
+			authz := r.Header.Get("Authorization")
+			var uid string
+			switch {
+			case strings.HasPrefix(authz, "Debug "):
+				uid = strings.TrimSpace(strings.TrimPrefix(authz, "Debug "))
+			case strings.HasPrefix(authz, "Bearer "):
+				uid = devUIDFromBearer(authz) // ✅ 讓不同手機用不同 Firebase 帳號 → 不會撞在一起
 			}
-			// 2) 沒有 Debug → 用 Cookie（每個瀏覽器穩定唯一）
 			if uid == "" {
 				uid = devUIDFromCookie(w, r)
 			}
@@ -77,7 +116,7 @@ func WithAuth(app *AppCtx, next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// 正式模式：必須 Bearer <Firebase IdToken>
+		// 正式模式：必須帶 Bearer，且用 Firebase 驗證簽章
 		authz := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authz, "Bearer ") {
 			http.Error(w, "missing bearer token", http.StatusUnauthorized)
@@ -94,13 +133,18 @@ func WithAuth(app *AppCtx, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// 非強制驗證：拿來決定 LikedByMe 等 viewer 身分
+// 非強制驗證：決定 viewer（likedByMe 用）
 func tryViewerUID(app *AppCtx, r *http.Request) string {
 	if config.NoAuth() {
-		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Debug ") {
-			return strings.TrimSpace(strings.TrimPrefix(h, "Debug "))
+		authz := r.Header.Get("Authorization")
+		if strings.HasPrefix(authz, "Debug ") {
+			return strings.TrimSpace(strings.TrimPrefix(authz, "Debug "))
 		}
-		// 與 WithAuth 一致：用 Cookie 當 viewer
+		if strings.HasPrefix(authz, "Bearer ") {
+			if uid := devUIDFromBearer(authz); uid != "" {
+				return uid
+			}
+		}
 		if c, err := r.Cookie(devUIDCookie); err == nil && c.Value != "" {
 			return c.Value
 		}

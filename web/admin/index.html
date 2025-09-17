@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Social Admin | 貼文管理</title>
 <style>
-  :root { --bg:#0b0d10; --card:#141820; --muted:#8b95a7; --text:#e6edf3; --primary:#4ea1ff; --danger:#ff6b6b; }
-  *{box-sizing:border-box} body{margin:0;font:14px/1.6 ui-sans-serif,system-ui,Segoe UI,Roboto;color:var(--text);background:linear-gradient(180deg,#0a0c10,#0e1218);}
+  :root { --bg:#0b0d10; --card:#141820; --muted:#8b95a7; --text:#e6edf3; --primary:#4ea1ff; --danger:#ff6b6b; --ok:#16c784; }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.6 ui-sans-serif,system-ui,Segoe UI,Roboto;color:var(--text);background:linear-gradient(180deg,#0a0c10,#0e1218);}  
   header{position:sticky;top:0;z-index:10;background:#0d1117cc;backdrop-filter:saturate(1.2) blur(6px);border-bottom:1px solid #232a36;}
-  .wrap{max-width:1100px;margin:0 auto;padding:16px;}
+  .wrap{max-width:1200px;margin:0 auto;padding:16px;}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   input,select,button,textarea{border:1px solid #263141;background:#0f141c;color:var(--text);padding:8px 10px;border-radius:10px}
   button{cursor:pointer}
@@ -18,7 +19,7 @@
   .tabs button{padding:8px 12px;border-radius:999px}
   .tabs .active{background:#1b2535;border-color:#2b3952}
   .grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}
-  @media(min-width:860px){.grid{grid-template-columns:1fr 1fr}}
+  @media(min-width:920px){.grid{grid-template-columns:1fr 1fr}}
   .card{background:var(--card);border:1px solid #212a37;border-radius:16px;overflow:hidden}
   .card .hd{display:flex;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px dashed #263141}
   .card .bd{padding:12px}
@@ -27,10 +28,16 @@
   .row-right{margin-left:auto;display:flex;gap:6px}
   .mt8{margin-top:8px}.mt12{margin-top:12px}.mt16{margin-top:16px}
   .img{border-radius:12px;max-width:100%;height:auto;border:1px solid #263141}
-  details{background:#0e141c;border:1px solid #1f2733;border-radius:12px;padding:8px 10px}
-  summary{cursor:pointer}
-  .footer{padding:20px 0;color:#718096}
   .k{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0c1017;border:1px solid #1f2a3c;padding:2px 6px;border-radius:6px}
+  /* 表格模式 */
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid #212a37;border-radius:14px;overflow:hidden}
+  th,td{padding:8px 10px;border-bottom:1px solid #1f2735;vertical-align:top}
+  th{background:#121825;text-align:left}
+  tr:hover td{background:#0e1420}
+  .nowrap{white-space:nowrap}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #2b3648;margin-right:4px}
+  .ok{color:var(--ok)}
 </style>
 </head>
 <body>
@@ -49,8 +56,8 @@
             <option value="bearer">Bearer Token</option>
           </select>
         </label>
-        <input id="debugUid" placeholder="u_me / u_bob …" style="width:140px">
-        <input id="bearer" placeholder="eyJhbGciOi…" style="width:260px;display:none">
+        <input id="debugUid" placeholder="demo_admin 或 email" style="width:160px">
+        <input id="bearer" placeholder="Firebase ID Token (eyJ...)" style="width:300px;display:none">
         <button class="primary" id="saveCfg">儲存設定</button>
       </div>
     </div>
@@ -61,16 +68,45 @@
         <button id="tabFollowing" data-tab="following">追蹤</button>
       </div>
       <input id="tags" placeholder="逗號分隔的標籤，如 flutter,design" style="min-width:280px">
+      <label>檢視
+        <select id="viewMode">
+          <option value="cards">卡片</option>
+          <option value="table">表格（管理）</option>
+        </select>
+      </label>
       <button id="btnReload" class="ghost">重新整理</button>
       <button id="btnNew" class="primary">新增貼文</button>
       <button id="btnAdminReload" class="ghost" title="POST /admin/reload（若有開）">重載檔案 → 記憶體</button>
+    </div>
+    <div class="row mt8" id="firebaseTestRow">
+      <details>
+        <summary>Firebase 測試（取得 ID Token 後，切到 Bearer）</summary>
+        <div class="mt8">
+          <ol>
+            <li>在此頁或任一前端初始化 Firebase 並登入（匿名或 email/password）。</li>
+            <li>執行：<span class="k">await getIdToken()</span>，把結果貼到上方 Bearer 欄位。</li>
+          </ol>
+          <pre class="k" style="display:block;white-space:pre-wrap">// 在瀏覽器 DevTools console 執行（已載入 Firebase 腳本時）
+// 匯入：&lt;script type="module" src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js"&gt; ...
+// 或使用你的專案前端直接呼叫
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js';
+import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js';
+const app = initializeApp({ /* your firebaseConfig */ });
+const auth = getAuth(app);
+await signInAnonymously(auth); // 或用 email/password 登入
+const t = await auth.currentUser.getIdToken(true);
+console.log(t);</pre>
+          <div class="muted">若用 Auth Emulator：請在後端設定 <span class="k">FIREBASE_AUTH_EMULATOR_HOST=localhost:9099</span>，前端 <span class="k">useEmulator(auth, "http://localhost:9099")</span>。</div>
+        </div>
+      </details>
     </div>
   </div>
 </header>
 
 <main class="wrap">
-  <div id="grid" class="grid"></div>
-  <div class="footer">提示：NO_AUTH=1 模式下，請在 Auth 選擇 <span class="k">Debug UID</span>；正式上線選 <span class="k">Bearer</span> 放入 Firebase ID Token。</div>
+  <div id="cards" class="grid"></div>
+  <div id="tableWrap" class="mt12" style="display:none"></div>
+  <div class="muted mt12">提示：NO_AUTH=1 下可選 <span class="k">Debug UID</span>；正式上線選 <span class="k">Bearer</span> 貼入 Firebase ID Token。管理刪文需由伺服器授權。</div>
 </main>
 
 <!-- 新增/編輯 dialog -->
@@ -94,77 +130,71 @@
 
 <script>
 const $ = (q)=>document.querySelector(q);
-const state = {
-  tab: 'friends',
-  editing: null, // post or null
-};
+const state = { tab:'friends', editing:null, view:'cards' };
 
-function loadCfg() {
+function loadCfg(){
   $('#base').value = localStorage.getItem('adm.base') || (location.origin.includes('http') ? location.origin : 'http://localhost:8088');
   const mode = localStorage.getItem('adm.mode') || 'debug';
   $('#authMode').value = mode;
-  $('#debugUid').value = localStorage.getItem('adm.debugUid') || 'u_me';
-  $('#bearer').value = localStorage.getItem('adm.bearer') || '';
+  $('#debugUid').value = localStorage.getItem('adm.debugUid') || 'demo_admin';
+  $('#bearer').value   = localStorage.getItem('adm.bearer')   || '';
   $('#bearer').style.display = mode==='bearer' ? 'inline-block' : 'none';
   $('#debugUid').style.display = mode==='debug' ? 'inline-block' : 'none';
 }
-function saveCfg() {
+function saveCfg(){
   localStorage.setItem('adm.base', $('#base').value.trim());
   localStorage.setItem('adm.mode', $('#authMode').value);
   localStorage.setItem('adm.debugUid', $('#debugUid').value.trim());
   localStorage.setItem('adm.bearer', $('#bearer').value.trim());
   alert('已儲存設定');
 }
-
-function authHeaders() {
+function authHeaders(){
   const mode = $('#authMode').value;
-  if (mode === 'bearer') {
+  if (mode==='bearer'){
     const t = $('#bearer').value.trim();
-    return t ? { 'Authorization': 'Bearer ' + t } : {};
+    return t? { Authorization: 'Bearer '+t } : {};
   } else {
-    const uid = $('#debugUid').value.trim() || 'u_me';
-    return { 'Authorization': 'Debug ' + uid };
+    const uid = $('#debugUid').value.trim() || 'demo_admin';
+    return { Authorization: 'Debug '+uid };
   }
 }
-
-async function api(path, opt={}) {
+async function api(path,opt={}){
   const base = $('#base').value.replace(/\/+$/,'');
   const headers = Object.assign({'Accept':'application/json'}, authHeaders(), opt.headers||{});
-  const res = await fetch(base + path, Object.assign({}, opt, {headers}));
-  if (!res.ok) {
-    const text = await res.text().catch(()=>res.statusText);
-    throw new Error(res.status + ' ' + text);
-  }
-  const ct = res.headers.get('content-type') || '';
-  if (ct.includes('application/json')) return res.json();
-  return res.text();
+  const res = await fetch(base+path, Object.assign({},opt,{headers}));
+  if(!res.ok){ throw new Error(res.status+' '+await res.text().catch(()=>res.statusText)); }
+  const ct = res.headers.get('content-type')||'';
+  return ct.includes('application/json')? res.json(): res.text();
 }
+function fmtTime(iso){ try{return new Date(iso).toLocaleString()}catch{return iso} }
+function parseTags(s){ return (s||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean); }
+function escapeHTML(s){return (s||'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' }[m]))}
+function imgAbs(url){ if(/^https?:\/\//i.test(url)) return url; return $('#base').value.replace(/\/+$/,'') + (url?.startsWith('/')? url : '/'+(url||'')); }
 
-function fmtTime(iso) {
-  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+// ---- 資料載入 ----
+async function load(){
+  if(state.view==='cards') return loadPostsCards();
+  return loadPostsTable();
 }
-function toTagsString(tags) { return (tags||[]).join(','); }
-function parseTags(str) { return str.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean); }
-
-async function loadPosts() {
-  $('#grid').innerHTML = '載入中…';
-  const tags = $('#tags').value.trim();
+async function loadPostsCards(){
+  $('#cards').innerHTML = '載入中…'; $('#tableWrap').style.display='none'; $('#cards').style.display='grid';
   const q = new URLSearchParams({ tab: state.tab });
-  if (tags) q.set('tags', tags);
-  const data = await api('/posts?' + q.toString());
-  renderPosts(data);
+  const tags = $('#tags').value.trim(); if(tags) q.set('tags', tags);
+  const data = await api('/posts?'+q.toString());
+  renderCards(data);
+}
+async function loadPostsTable(){
+  $('#tableWrap').innerHTML = '載入中…'; $('#cards').style.display='none'; $('#tableWrap').style.display='block';
+  const data = await api('/admin/posts');
+  renderTable(data);
 }
 
-function renderPosts(list) {
-  const grid = $('#grid');
-  grid.innerHTML = '';
-  if (!list.length) {
-    grid.innerHTML = '<div class="muted">沒有資料</div>';
-    return;
-  }
-  for (const p of list) {
-    const card = document.createElement('div');
-    card.className = 'card';
+// ---- 卡片模式 ----
+function renderCards(list){
+  const grid = $('#cards'); grid.innerHTML='';
+  if(!list.length){ grid.innerHTML='<div class="muted">沒有資料</div>'; return; }
+  for(const p of list){
+    const card = document.createElement('div'); card.className='card';
     card.innerHTML = `
       <div class="hd">
         <div><strong>${escapeHTML(p.author?.name||'')}</strong> <span class="muted">· ${fmtTime(p.createdAt)}</span></div>
@@ -178,116 +208,75 @@ function renderPosts(list) {
         <div>${escapeHTML(p.text||'')}</div>
         ${p.tags?.length? `<div class="mt8">${p.tags.map(t=>`<span class="chip">#${escapeHTML(t)}</span>`).join('')}</div>`:''}
         ${p.imageUrl? `<div class="mt12"><img class="img" src="${imgAbs(p.imageUrl)}" alt=""></div>`:''}
-      </div>
-    `;
+      </div>`;
     card.querySelector('[data-act="edit"]').onclick = ()=>openEditor(p);
     card.querySelector('[data-act="like"]').onclick = ()=>toggleLike(p);
     card.querySelector('[data-act="comment"]').onclick = ()=>addComment(p);
     grid.appendChild(card);
   }
 }
-function imgAbs(url){
-  if (/^https?:\/\//i.test(url)) return url;
-  return $('#base').value.replace(/\/+$/,'') + (url.startsWith('/')? url : '/'+url);
-}
-function escapeHTML(s){return (s||'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]))}
 
-function setActiveTab(btn) {
-  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  state.tab = btn.dataset.tab;
-}
-
-$('#tabFriends').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
-$('#tabHot').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
-$('#tabFollowing').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
-$('#btnReload').onclick = loadPosts;
-$('#btnNew').onclick = ()=>openEditor(null);
-$('#btnAdminReload').onclick = async ()=>{
-  try {
-    await api('/admin/reload', { method:'POST' });
-    alert('已重載檔案 → 記憶體');
-    loadPosts();
-  } catch (e) { alert('呼叫 /admin/reload 失敗：' + e.message); }
-};
-
-$('#saveCfg').onclick = saveCfg;
-$('#authMode').onchange = ()=>{
-  const m = $('#authMode').value;
-  $('#bearer').style.display = m==='bearer' ? 'inline-block' : 'none';
-  $('#debugUid').style.display = m==='debug' ? 'inline-block' : 'none';
-};
-
-function openEditor(post){
-  state.editing = post;
-  $('#dlgTitle').textContent = post? '編輯貼文' : '新增貼文';
-  $('#fText').value = post?.text || '';
-  $('#fTags').value = post? (post.tags||[]).join(',') : '';
-  $('#fImg').value = '';
-  $('#btnDel').style.display = post? 'inline-block' : 'none';
-  $('#btnSubmit').onclick = submitEditor;
-  $('#btnDel').onclick = async ()=>{
-    if(!confirm('確定要刪除？')) return;
-    await api('/posts/'+post.id, { method:'DELETE' });
-    $('#dlg').close(); loadPosts();
-  };
-  $('#dlg').showModal();
-}
-async function submitEditor(ev){
-  ev.preventDefault();
-  const isEdit = !!state.editing;
-  const text = $('#fText').value.trim();
-  const tags = parseTags($('#fTags').value);
-  let imageUrl = state.editing?.imageUrl || null;
-
-  // 若選了新檔 → 先上傳 /upload
-  const file = $('#fImg').files[0];
-  if (file) {
-    const fd = new FormData();
-    fd.append('file', file);
-    const base = $('#base').value.replace(/\/+$/,'');
-    const res = await fetch(base + '/upload', { method:'POST', headers: authHeaders(), body: fd });
-    if (!res.ok) {
-      alert('上傳失敗：' + await res.text()); return;
-    }
-    const j = await res.json();
-    imageUrl = j.url; // 伺服器回 /uploads/xxx
-  }
-
-  if (isEdit) {
-    await api('/posts/'+state.editing.id, {
-      method:'PUT',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ text, tags, imageUrl }),
-    });
-  } else {
-    await api('/posts', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ text, tags, imageUrl }),
-    });
-  }
-  $('#dlg').close(); loadPosts();
-}
-
-async function toggleLike(p){
-  await api('/posts/'+p.id+'/like', { method:'POST' });
-  loadPosts();
-}
-async function addComment(p){
-  const t = prompt('輸入留言內容：');
-  if (!t) return;
-  await api('/posts/'+p.id+'/comments', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ text: t })
+// ---- 表格模式（管理） ----
+function renderTable(list){
+  const wrap = $('#tableWrap');
+  if(!list.length){ wrap.innerHTML='<div class="muted">沒有資料</div>'; return; }
+  const rows = list.map(p=>`
+    <tr>
+      <td class="mono nowrap">${escapeHTML(p.id)}</td>
+      <td>
+        <div class="mono">${escapeHTML(p.author?.id||'')}</div>
+        <div class="muted">${escapeHTML(p.author?.name||'')}</div>
+      </td>
+      <td class="nowrap">${fmtTime(p.createdAt)}</td>
+      <td>${escapeHTML(p.text||'')}</td>
+      <td>${(p.tags||[]).map(t=>`<span class="pill">#${escapeHTML(t)}</span>`).join('')}</td>
+      <td class="nowrap">❤ ${p.likeCount||0}<br><span class="muted">${(p.likedBy||[]).length} 人</span></td>
+      <td class="nowrap">💬 ${p.comments?.length||0}</td>
+      <td>${p.imageUrl? `<a href="${imgAbs(p.imageUrl)}" target="_blank">查看</a>`:''}</td>
+      <td class="nowrap">
+        <button class="danger" data-id="${escapeHTML(p.id)}">刪除</button>
+      </td>
+    </tr>`).join('');
+  wrap.innerHTML = `<table>
+    <thead><tr>
+      <th>PostID</th><th>作者</th><th>建立時間</th><th>內容</th><th>標籤</th><th>讚</th><th>留言</th><th>圖片</th><th>操作</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+  wrap.querySelectorAll('button.danger').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const id = btn.getAttribute('data-id');
+      if(!confirm('確定刪除此貼文？\nID: '+id)) return;
+      try {
+        await api('/posts/'+id, { method:'DELETE' });
+        loadPostsTable();
+      } catch(e){ alert('刪除失敗：'+e.message); }
+    };
   });
-  loadPosts();
 }
 
-// init
-loadCfg();
-loadPosts();
+// ---- 互動：按讚 / 留言 / 編輯 ----
+async function toggleLike(p){ await api('/posts/'+p.id+'/like',{method:'POST'}); load(); }
+async function addComment(p){ const t = prompt('輸入留言內容：'); if(!t) return; await api('/posts/'+p.id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})}); load(); }
+function openEditor(post){ state.editing = post; $('#dlgTitle').textContent = post? '編輯貼文':'新增貼文'; $('#fText').value = post?.text||''; $('#fTags').value = post? (post.tags||[]).join(','):''; $('#fImg').value=''; $('#btnDel').style.display = post? 'inline-block':'none'; $('#btnSubmit').onclick = submitEditor; $('#btnDel').onclick = async ()=>{ if(!confirm('確定要刪除？')) return; await api('/posts/'+post.id,{method:'DELETE'}); $('#dlg').close(); load(); }; $('#dlg').showModal(); }
+async function submitEditor(ev){ ev.preventDefault(); const isEdit=!!state.editing; const text=$('#fText').value.trim(); const tags=parseTags($('#fTags').value); let imageUrl=state.editing?.imageUrl||null; const file=$('#fImg').files[0]; if(file){ const fd=new FormData(); fd.append('file',file); const base=$('#base').value.replace(/\/+$/,''); const res=await fetch(base+'/upload',{method:'POST',headers:authHeaders(),body:fd}); if(!res.ok){ alert('上傳失敗：'+await res.text()); return;} const j=await res.json(); imageUrl = j.url; }
+  if(isEdit){ await api('/posts/'+state.editing.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,tags,imageUrl})}); } else { await api('/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,tags,imageUrl})}); }
+  $('#dlg').close(); load(); }
+
+// ---- 事件繫結 ----
+$('#tabFriends').onclick = (e)=>{ setActiveTab(e.target); load(); };
+$('#tabHot').onclick = (e)=>{ setActiveTab(e.target); load(); };
+$('#tabFollowing').onclick = (e)=>{ setActiveTab(e.target); load(); };
+$('#btnReload').onclick = load;
+$('#btnNew').onclick = ()=>openEditor(null);
+$('#btnAdminReload').onclick = async ()=>{ try{ await api('/admin/reload',{method:'POST'}); alert('已重載檔案 → 記憶體'); load(); } catch(e){ alert('呼叫 /admin/reload 失敗：'+e.message); } };
+$('#saveCfg').onclick = saveCfg;
+$('#authMode').onchange = ()=>{ const m=$('#authMode').value; $('#bearer').style.display = m==='bearer' ? 'inline-block' : 'none'; $('#debugUid').style.display = m==='debug' ? 'inline-block' : 'none'; };
+$('#viewMode').onchange = ()=>{ state.view=$('#viewMode').value; load(); };
+function setActiveTab(btn){ document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); state.tab = btn.dataset.tab; }
+
+// ---- Init ----
+loadCfg(); load();
 </script>
 </body>
 </html>

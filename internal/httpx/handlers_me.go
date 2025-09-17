@@ -8,23 +8,24 @@ import (
 	"local.dev/socialdemo-backend/internal/models"
 )
 
+// 片段（你現有的 HandleMe 基本上就是這樣）
 func HandleMe(app *AppCtx) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		uid := currentUID(r)
+		key := currentUID(r) // 這是 email(小寫) 或 uid 或 dev_xxx
 		switch r.Method {
 		case http.MethodGet:
-			if p, ok := app.Store.GetProfile(uid); ok {
+			if p, ok := app.Store.GetProfile(key); ok {
 				writeJSON(w, http.StatusOK, p)
 				return
 			}
-			writeJSON(w, http.StatusOK, models.Profile{ID: uid, Name: uid})
+			writeJSON(w, http.StatusOK, models.Profile{ID: key, Name: key})
 		case http.MethodPatch:
 			var p models.Profile
 			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			p.ID = uid
+			p.ID = key // ← 強制用後端認的身分鍵
 			updated := app.Store.UpsertProfile(p)
 			app.Store.SaveProfiles(app.Paths.ProfilesFile)
 			writeJSON(w, http.StatusOK, updated)

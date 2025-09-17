@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Social Admin | 貼文管理</title>
+<title>Social Admin | 貼文管理（卡片 / 表格）</title>
 <style>
-  :root { --bg:#0b0d10; --card:#141820; --muted:#8b95a7; --text:#e6edf3; --primary:#4ea1ff; --danger:#ff6b6b; --ok:#16c784; }
+  :root { --bg:#0b0d10; --card:#141820; --muted:#8b95a7; --text:#e6edf3; --primary:#4ea1ff; --danger:#ff6b6b; --ok:#34d399;}
   *{box-sizing:border-box}
-  body{margin:0;font:14px/1.6 ui-sans-serif,system-ui,Segoe UI,Roboto;color:var(--text);background:linear-gradient(180deg,#0a0c10,#0e1218);}  
+  body{margin:0;font:14px/1.6 ui-sans-serif,system-ui,Segoe UI,Roboto;color:var(--text);background:linear-gradient(180deg,#0a0c10,#0e1218);}
   header{position:sticky;top:0;z-index:10;background:#0d1117cc;backdrop-filter:saturate(1.2) blur(6px);border-bottom:1px solid #232a36;}
-  .wrap{max-width:1200px;margin:0 auto;padding:16px;}
+  .wrap{max-width:1200px;margin:0 auto;padding:14px 16px;}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row-right{margin-left:auto;display:flex;gap:6px;align-items:center}
   input,select,button,textarea{border:1px solid #263141;background:#0f141c;color:var(--text);padding:8px 10px;border-radius:10px}
   button{cursor:pointer}
   button.primary{background:var(--primary);border-color:#3a8be6;color:#071019}
@@ -18,26 +19,31 @@
   button.danger{background:var(--danger);border-color:#e25858;color:#2a0c0c}
   .tabs button{padding:8px 12px;border-radius:999px}
   .tabs .active{background:#1b2535;border-color:#2b3952}
+  .pill{padding:6px 10px;border-radius:999px;border:1px solid #2b3648;background:#121826;cursor:pointer}
+  .pill.active{background:#1b2535;border-color:#2b3952}
+  .muted{color:var(--muted)}
   .grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}
-  @media(min-width:920px){.grid{grid-template-columns:1fr 1fr}}
+  @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
   .card{background:var(--card);border:1px solid #212a37;border-radius:16px;overflow:hidden}
   .card .hd{display:flex;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px dashed #263141}
   .card .bd{padding:12px}
   .chip{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid #2b3648;color:#b8c2d3;margin-right:6px}
-  .muted{color:var(--muted)}
-  .row-right{margin-left:auto;display:flex;gap:6px}
-  .mt8{margin-top:8px}.mt12{margin-top:12px}.mt16{margin-top:16px}
   .img{border-radius:12px;max-width:100%;height:auto;border:1px solid #263141}
   .k{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0c1017;border:1px solid #1f2a3c;padding:2px 6px;border-radius:6px}
-  /* 表格模式 */
-  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid #212a37;border-radius:14px;overflow:hidden}
-  th,td{padding:8px 10px;border-bottom:1px solid #1f2735;vertical-align:top}
-  th{background:#121825;text-align:left}
-  tr:hover td{background:#0e1420}
-  .nowrap{white-space:nowrap}
+  .footer{padding:20px 0;color:#718096}
+  /* table view */
+  .table-wrap{margin-top:12px;background:var(--card);border:1px solid #212a37;border-radius:14px;overflow:auto}
+  table{width:100%;border-collapse:separate;border-spacing:0;min-width:960px}
+  thead th{position:sticky;top:0;background:#121826;border-bottom:1px solid #263141;padding:10px;text-align:left;font-weight:600}
+  tbody td{border-bottom:1px dashed #263141;padding:8px 10px;vertical-align:top}
+  tbody tr:hover{background:#111722}
   .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
-  .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #2b3648;margin-right:4px}
+  .nowrap{white-space:nowrap}
+  .truncate{max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tag{display:inline-block;border:1px solid #2b3648;border-radius:999px;padding:0 8px;margin:0 4px 4px 0;color:#c6d0e1}
+  .opbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
   .ok{color:var(--ok)}
+  details code{font-size:12px}
 </style>
 </head>
 <body>
@@ -47,7 +53,7 @@
     <div class="row">
       <strong>貼文管理面板</strong>
       <div class="row-right">
-        <label>API Base
+        <label>API
           <input id="base" placeholder="http://localhost:8088" style="width:220px">
         </label>
         <label>Auth
@@ -56,60 +62,70 @@
             <option value="bearer">Bearer Token</option>
           </select>
         </label>
-        <input id="debugUid" placeholder="demo_admin 或 email" style="width:160px">
-        <input id="bearer" placeholder="Firebase ID Token (eyJ...)" style="width:300px;display:none">
-        <button class="primary" id="saveCfg">儲存設定</button>
+        <input id="debugUid" placeholder="alice@example.com" style="width:180px">
+        <input id="bearer" placeholder="eyJhbGciOi…" style="width:300px;display:none">
+        <button class="primary" id="saveCfg">儲存</button>
       </div>
     </div>
-    <div class="row mt8">
+
+    <div class="row" style="margin-top:8px">
       <div class="tabs" role="tablist">
         <button id="tabFriends" data-tab="friends" class="active">好友</button>
         <button id="tabHot" data-tab="hot">熱門</button>
         <button id="tabFollowing" data-tab="following">追蹤</button>
       </div>
-      <input id="tags" placeholder="逗號分隔的標籤，如 flutter,design" style="min-width:280px">
-      <label>檢視
-        <select id="viewMode">
-          <option value="cards">卡片</option>
-          <option value="table">表格（管理）</option>
-        </select>
-      </label>
-      <button id="btnReload" class="ghost">重新整理</button>
-      <button id="btnNew" class="primary">新增貼文</button>
-      <button id="btnAdminReload" class="ghost" title="POST /admin/reload（若有開）">重載檔案 → 記憶體</button>
+
+      <input id="tags" placeholder="逗號分隔的標籤，如 flutter,design" style="min-width:260px">
+
+      <input id="quick" placeholder="快速搜尋（作者/文字/標籤/ID）" style="min-width:260px">
+
+      <span class="row-right">
+        <button id="btnReload" class="ghost">重新整理</button>
+        <button id="btnNew" class="primary">新增貼文</button>
+        <button id="btnAdminReload" class="ghost" title="POST /admin/reload">重載檔案 → 記憶體</button>
+        <span class="pill active" id="viewCards">卡片模式</span>
+        <span class="pill" id="viewTable">表格模式（管理）</span>
+      </span>
     </div>
-    <div class="row mt8" id="firebaseTestRow">
-      <details>
-        <summary>Firebase 測試（取得 ID Token 後，切到 Bearer）</summary>
-        <div class="mt8">
-          <ol>
-            <li>在此頁或任一前端初始化 Firebase 並登入（匿名或 email/password）。</li>
-            <li>執行：<span class="k">await getIdToken()</span>，把結果貼到上方 Bearer 欄位。</li>
-          </ol>
-          <pre class="k" style="display:block;white-space:pre-wrap">// 在瀏覽器 DevTools console 執行（已載入 Firebase 腳本時）
-// 匯入：&lt;script type="module" src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js"&gt; ...
-// 或使用你的專案前端直接呼叫
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js';
-import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js';
-const app = initializeApp({ /* your firebaseConfig */ });
-const auth = getAuth(app);
-await signInAnonymously(auth); // 或用 email/password 登入
-const t = await auth.currentUser.getIdToken(true);
-console.log(t);</pre>
-          <div class="muted">若用 Auth Emulator：請在後端設定 <span class="k">FIREBASE_AUTH_EMULATOR_HOST=localhost:9099</span>，前端 <span class="k">useEmulator(auth, "http://localhost:9099")</span>。</div>
-        </div>
-      </details>
+
+    <div class="opbar">
+      <button id="btnDeleteSel" class="danger" title="刪除勾選的貼文" style="display:none">刪除選取</button>
+      <button id="btnExportCSV" class="ghost" title="匯出目前列表為 CSV">匯出 CSV</button>
+      <button id="btnExportJSON" class="ghost" title="匯出目前列表為 JSON">匯出 JSON</button>
+      <span class="muted">提示：NO_AUTH=1 下用 <span class="k">Debug UID</span>；正式上線用 <span class="k">Bearer</span> 放 Firebase ID Token。</span>
     </div>
   </div>
 </header>
 
 <main class="wrap">
-  <div id="cards" class="grid"></div>
-  <div id="tableWrap" class="mt12" style="display:none"></div>
-  <div class="muted mt12">提示：NO_AUTH=1 下可選 <span class="k">Debug UID</span>；正式上線選 <span class="k">Bearer</span> 貼入 Firebase ID Token。管理刪文需由伺服器授權。</div>
+  <!-- cards -->
+  <div id="grid" class="grid"></div>
+
+  <!-- table -->
+  <div id="tblWrap" class="table-wrap" style="display:none">
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th style="width:36px"><input type="checkbox" id="chkAll"></th>
+          <th>Post ID</th>
+          <th>作者</th>
+          <th class="nowrap">建立時間</th>
+          <th>內容</th>
+          <th>標籤</th>
+          <th class="nowrap">讚數</th>
+          <th class="nowrap">留言</th>
+          <th>圖片</th>
+          <th style="width:160px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="footer">© demo admin</div>
 </main>
 
-<!-- 新增/編輯 dialog -->
+<!-- 新增/編輯 dialog（沿用卡片模式的） -->
 <dialog id="dlg" style="border:none;border-radius:16px;padding:0;background:#0e141a;color:#e6edf3">
   <form method="dialog" style="padding:16px;min-width:320px;width:min(560px,90vw)">
     <h3 id="dlgTitle">新增貼文</h3>
@@ -130,71 +146,124 @@ console.log(t);</pre>
 
 <script>
 const $ = (q)=>document.querySelector(q);
-const state = { tab:'friends', editing:null, view:'cards' };
+const state = {
+  tab: 'friends',
+  view: 'cards', // 'cards' | 'table'
+  list: [],
+  editing: null, // post or null
+  selected: new Set(),
+  sort: { key: 'createdAt', dir: 'desc' },
+};
 
-function loadCfg(){
-  $('#base').value = localStorage.getItem('adm.base') || (location.origin.includes('http') ? location.origin : 'http://localhost:8088');
+function loadCfg() {
+  $('#base').value = localStorage.getItem('adm.base') || (location.origin.startsWith('http') ? location.origin : 'http://localhost:8088');
   const mode = localStorage.getItem('adm.mode') || 'debug';
   $('#authMode').value = mode;
-  $('#debugUid').value = localStorage.getItem('adm.debugUid') || 'demo_admin';
-  $('#bearer').value   = localStorage.getItem('adm.bearer')   || '';
+  $('#debugUid').value = localStorage.getItem('adm.debugUid') || 'alice@example.com';
+  $('#bearer').value = localStorage.getItem('adm.bearer') || '';
   $('#bearer').style.display = mode==='bearer' ? 'inline-block' : 'none';
   $('#debugUid').style.display = mode==='debug' ? 'inline-block' : 'none';
+  $('#quick').value = localStorage.getItem('adm.quick') || '';
+  $('#tags').value = localStorage.getItem('adm.tags') || '';
 }
-function saveCfg(){
+function saveCfg() {
   localStorage.setItem('adm.base', $('#base').value.trim());
   localStorage.setItem('adm.mode', $('#authMode').value);
   localStorage.setItem('adm.debugUid', $('#debugUid').value.trim());
   localStorage.setItem('adm.bearer', $('#bearer').value.trim());
+  localStorage.setItem('adm.quick', $('#quick').value.trim());
+  localStorage.setItem('adm.tags', $('#tags').value.trim());
   alert('已儲存設定');
 }
-function authHeaders(){
+
+function authHeaders() {
   const mode = $('#authMode').value;
-  if (mode==='bearer'){
+  if (mode === 'bearer') {
     const t = $('#bearer').value.trim();
-    return t? { Authorization: 'Bearer '+t } : {};
+    return t ? { 'Authorization': 'Bearer ' + t } : {};
   } else {
-    const uid = $('#debugUid').value.trim() || 'demo_admin';
-    return { Authorization: 'Debug '+uid };
+    const uid = $('#debugUid').value.trim() || 'u_me';
+    return { 'Authorization': 'Debug ' + uid };
   }
 }
-async function api(path,opt={}){
+function imgAbs(url){
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url)) return url;
+  return $('#base').value.replace(/\/+$/,'') + (url.startsWith('/')? url : '/'+url);
+}
+function escapeHTML(s){return (s||'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]))}
+function fmtTime(iso){ try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+
+async function api(path, opt={}) {
   const base = $('#base').value.replace(/\/+$/,'');
   const headers = Object.assign({'Accept':'application/json'}, authHeaders(), opt.headers||{});
-  const res = await fetch(base+path, Object.assign({},opt,{headers}));
-  if(!res.ok){ throw new Error(res.status+' '+await res.text().catch(()=>res.statusText)); }
-  const ct = res.headers.get('content-type')||'';
-  return ct.includes('application/json')? res.json(): res.text();
+  const res = await fetch(base + path, Object.assign({}, opt, {headers}));
+  if (!res.ok) {
+    const text = await res.text().catch(()=>res.statusText);
+    throw new Error(res.status + ' ' + text);
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return res.text();
 }
-function fmtTime(iso){ try{return new Date(iso).toLocaleString()}catch{return iso} }
-function parseTags(s){ return (s||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean); }
-function escapeHTML(s){return (s||'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' }[m]))}
-function imgAbs(url){ if(/^https?:\/\//i.test(url)) return url; return $('#base').value.replace(/\/+$/,'') + (url?.startsWith('/')? url : '/'+(url||'')); }
 
-// ---- 資料載入 ----
-async function load(){
-  if(state.view==='cards') return loadPostsCards();
-  return loadPostsTable();
+function setActiveTab(btn) {
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  state.tab = btn.dataset.tab;
 }
-async function loadPostsCards(){
-  $('#cards').innerHTML = '載入中…'; $('#tableWrap').style.display='none'; $('#cards').style.display='grid';
+
+function setView(v) {
+  state.view = v;
+  $('#viewCards').classList.toggle('active', v==='cards');
+  $('#viewTable').classList.toggle('active', v==='table');
+  $('#grid').style.display = v==='cards' ? '' : 'none';
+  $('#tblWrap').style.display = v==='table' ? '' : 'none';
+  $('#btnDeleteSel').style.display = v==='table' ? '' : 'none';
+  render();
+}
+
+async function loadPosts() {
+  const tags = $('#tags').value.trim();
   const q = new URLSearchParams({ tab: state.tab });
-  const tags = $('#tags').value.trim(); if(tags) q.set('tags', tags);
-  const data = await api('/posts?'+q.toString());
-  renderCards(data);
-}
-async function loadPostsTable(){
-  $('#tableWrap').innerHTML = '載入中…'; $('#cards').style.display='none'; $('#tableWrap').style.display='block';
-  const data = await api('/admin/posts');
-  renderTable(data);
+  if (tags) q.set('tags', tags);
+  const data = await api('/posts?' + q.toString());
+  state.list = data;
+  render();
 }
 
-// ---- 卡片模式 ----
-function renderCards(list){
-  const grid = $('#cards'); grid.innerHTML='';
-  if(!list.length){ grid.innerHTML='<div class="muted">沒有資料</div>'; return; }
-  for(const p of list){
-    const card = document.createElement('div'); card.className='card';
+function render() {
+  const needle = ($('#quick').value || '').trim().toLowerCase();
+  const filtered = state.list.filter(p=>{
+    if (!needle) return true;
+    const hay = [
+      p.id, p.text, (p.author?.name||''), (p.author?.id||''), ...(p.tags||[])
+    ].join(' ').toLowerCase();
+    return hay.includes(needle);
+  });
+  // sort (table mode only; cards使用後端排序)
+  let list = filtered;
+  if (state.view==='table') {
+    const {key, dir} = state.sort;
+    list = [...filtered].sort((a,b)=>{
+      let va = a[key], vb = b[key];
+      if (key==='createdAt') { va = a.createdAt; vb = b.createdAt; }
+      if (key==='likeCount') { va = a.likeCount|0; vb = b.likeCount|0; }
+      if (va<vb) return dir==='asc'? -1: 1;
+      if (va>vb) return dir==='asc'? 1: -1;
+      return 0;
+    });
+  }
+  (state.view==='cards') ? renderCards(list) : renderTable(list);
+}
+
+function renderCards(list) {
+  const grid = $('#grid');
+  grid.innerHTML = '';
+  if (!list.length) { grid.innerHTML = '<div class="muted">沒有資料</div>'; return; }
+  for (const p of list) {
+    const card = document.createElement('div');
+    card.className = 'card';
     card.innerHTML = `
       <div class="hd">
         <div><strong>${escapeHTML(p.author?.name||'')}</strong> <span class="muted">· ${fmtTime(p.createdAt)}</span></div>
@@ -206,8 +275,8 @@ function renderCards(list){
       </div>
       <div class="bd">
         <div>${escapeHTML(p.text||'')}</div>
-        ${p.tags?.length? `<div class="mt8">${p.tags.map(t=>`<span class="chip">#${escapeHTML(t)}</span>`).join('')}</div>`:''}
-        ${p.imageUrl? `<div class="mt12"><img class="img" src="${imgAbs(p.imageUrl)}" alt=""></div>`:''}
+        ${p.tags?.length? `<div style="margin-top:6px">${p.tags.map(t=>`<span class="chip">#${escapeHTML(t)}</span>`).join('')}</div>`:''}
+        ${p.imageUrl? `<div style="margin-top:10px"><img class="img" src="${imgAbs(p.imageUrl)}" alt=""></div>`:''}
       </div>`;
     card.querySelector('[data-act="edit"]').onclick = ()=>openEditor(p);
     card.querySelector('[data-act="like"]').onclick = ()=>toggleLike(p);
@@ -216,67 +285,221 @@ function renderCards(list){
   }
 }
 
-// ---- 表格模式（管理） ----
-function renderTable(list){
-  const wrap = $('#tableWrap');
-  if(!list.length){ wrap.innerHTML='<div class="muted">沒有資料</div>'; return; }
-  const rows = list.map(p=>`
-    <tr>
-      <td class="mono nowrap">${escapeHTML(p.id)}</td>
+function renderTable(list) {
+  const tb = $('#tbody');
+  tb.innerHTML = '';
+  for (const p of list) {
+    const tr = document.createElement('tr');
+    const tags = (p.tags||[]).map(t=>`<span class="tag">#${escapeHTML(t)}</span>`).join('');
+    const img = p.imageUrl ? `<a href="${imgAbs(p.imageUrl)}" target="_blank">開啟</a>` : '';
+    const comments = (p.comments||[]);
+    const commentsHtml = comments.length
+      ? `<details><summary>${comments.length} 則</summary><div>${comments.map(c=>`<div style="margin:6px 0">
+          <div class="mono">${escapeHTML(c.id)}</div>
+          <div><strong>${escapeHTML(c.author?.name||'')}</strong> · <span class="muted">${fmtTime(c.createdAt)}</span></div>
+          <div>${escapeHTML(c.text||'')}</div>
+        </div>`).join('')}</div></details>`
+      : '<span class="muted">0</span>';
+
+    tr.innerHTML = `
+      <td><input type="checkbox" class="chk" data-id="${p.id}"></td>
+      <td class="mono nowrap"><a href="#" data-copy="${p.id}" title="複製 ID">${p.id}</a></td>
       <td>
-        <div class="mono">${escapeHTML(p.author?.id||'')}</div>
-        <div class="muted">${escapeHTML(p.author?.name||'')}</div>
+        <div><strong>${escapeHTML(p.author?.name||'')}</strong></div>
+        <div class="mono muted">${escapeHTML(p.author?.id||'')}</div>
       </td>
-      <td class="nowrap">${fmtTime(p.createdAt)}</td>
-      <td>${escapeHTML(p.text||'')}</td>
-      <td>${(p.tags||[]).map(t=>`<span class="pill">#${escapeHTML(t)}</span>`).join('')}</td>
-      <td class="nowrap">❤ ${p.likeCount||0}<br><span class="muted">${(p.likedBy||[]).length} 人</span></td>
-      <td class="nowrap">💬 ${p.comments?.length||0}</td>
-      <td>${p.imageUrl? `<a href="${imgAbs(p.imageUrl)}" target="_blank">查看</a>`:''}</td>
       <td class="nowrap">
-        <button class="danger" data-id="${escapeHTML(p.id)}">刪除</button>
+        <div>${fmtTime(p.createdAt)}</div>
+        <div class="mono muted">${escapeHTML(p.createdAt)}</div>
       </td>
-    </tr>`).join('');
-  wrap.innerHTML = `<table>
-    <thead><tr>
-      <th>PostID</th><th>作者</th><th>建立時間</th><th>內容</th><th>標籤</th><th>讚</th><th>留言</th><th>圖片</th><th>操作</th>
-    </tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-  wrap.querySelectorAll('button.danger').forEach(btn=>{
-    btn.onclick = async ()=>{
-      const id = btn.getAttribute('data-id');
-      if(!confirm('確定刪除此貼文？\nID: '+id)) return;
-      try {
-        await api('/posts/'+id, { method:'DELETE' });
-        loadPostsTable();
-      } catch(e){ alert('刪除失敗：'+e.message); }
+      <td class="truncate" title="${escapeHTML(p.text||'')}">${escapeHTML(p.text||'')}</td>
+      <td>${tags||'<span class="muted">—</span>'}</td>
+      <td class="nowrap">${p.likeCount||0}${p.likedByMe?' <span class="ok">★</span>':''}</td>
+      <td>${commentsHtml}</td>
+      <td>${img||'<span class="muted">—</span>'}</td>
+      <td class="nowrap">
+        <button class="ghost" data-act="edit" data-id="${p.id}">編輯</button>
+        <button class="danger" data-act="del" data-id="${p.id}">刪除</button>
+      </td>
+    `;
+    tb.appendChild(tr);
+  }
+
+  // 事件：全選 / 單選
+  $('#chkAll').checked = false;
+  state.selected.clear();
+  $('#chkAll').onchange = (e)=>{
+    tb.querySelectorAll('.chk').forEach(chk=>{
+      chk.checked = e.target.checked;
+      selToggle(chk.dataset.id, chk.checked);
+    });
+  };
+  tb.querySelectorAll('.chk').forEach(chk=>{
+    chk.onchange = ()=> selToggle(chk.dataset.id, chk.checked);
+  });
+
+  // 複製 ID
+  tb.querySelectorAll('[data-copy]').forEach(a=>{
+    a.onclick = (ev)=>{ ev.preventDefault(); copy(a.dataset.copy); };
+  });
+
+  // 操作按鈕
+  tb.querySelectorAll('[data-act="edit"]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const post = state.list.find(x=>x.id===btn.dataset.id);
+      if (post) openEditor(post);
     };
+  });
+  tb.querySelectorAll('[data-act="del"]').forEach(btn=>{
+    btn.onclick = ()=> delOne(btn.dataset.id);
   });
 }
 
-// ---- 互動：按讚 / 留言 / 編輯 ----
-async function toggleLike(p){ await api('/posts/'+p.id+'/like',{method:'POST'}); load(); }
-async function addComment(p){ const t = prompt('輸入留言內容：'); if(!t) return; await api('/posts/'+p.id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})}); load(); }
-function openEditor(post){ state.editing = post; $('#dlgTitle').textContent = post? '編輯貼文':'新增貼文'; $('#fText').value = post?.text||''; $('#fTags').value = post? (post.tags||[]).join(','):''; $('#fImg').value=''; $('#btnDel').style.display = post? 'inline-block':'none'; $('#btnSubmit').onclick = submitEditor; $('#btnDel').onclick = async ()=>{ if(!confirm('確定要刪除？')) return; await api('/posts/'+post.id,{method:'DELETE'}); $('#dlg').close(); load(); }; $('#dlg').showModal(); }
-async function submitEditor(ev){ ev.preventDefault(); const isEdit=!!state.editing; const text=$('#fText').value.trim(); const tags=parseTags($('#fTags').value); let imageUrl=state.editing?.imageUrl||null; const file=$('#fImg').files[0]; if(file){ const fd=new FormData(); fd.append('file',file); const base=$('#base').value.replace(/\/+$/,''); const res=await fetch(base+'/upload',{method:'POST',headers:authHeaders(),body:fd}); if(!res.ok){ alert('上傳失敗：'+await res.text()); return;} const j=await res.json(); imageUrl = j.url; }
-  if(isEdit){ await api('/posts/'+state.editing.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,tags,imageUrl})}); } else { await api('/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,tags,imageUrl})}); }
-  $('#dlg').close(); load(); }
+function selToggle(id, checked){
+  if (checked) state.selected.add(id); else state.selected.delete(id);
+  $('#btnDeleteSel').disabled = state.selected.size===0;
+}
 
-// ---- 事件繫結 ----
-$('#tabFriends').onclick = (e)=>{ setActiveTab(e.target); load(); };
-$('#tabHot').onclick = (e)=>{ setActiveTab(e.target); load(); };
-$('#tabFollowing').onclick = (e)=>{ setActiveTab(e.target); load(); };
-$('#btnReload').onclick = load;
+async function delOne(id){
+  if (!confirm(`確定刪除貼文 ${id} ？`)) return;
+  try{
+    await api('/posts/'+id, { method:'DELETE' });
+    state.list = state.list.filter(p=>p.id!==id);
+    render();
+  }catch(e){ alert('刪除失敗：'+e.message); }
+}
+
+$('#btnDeleteSel').onclick = async ()=>{
+  if (state.selected.size===0) return;
+  if (!confirm(`確定刪除 ${state.selected.size} 筆貼文？`)) return;
+  const ids = Array.from(state.selected);
+  for (const id of ids) {
+    try { await api('/posts/'+id, { method:'DELETE' }); }
+    catch(e){ console.warn('刪除失敗', id, e); }
+  }
+  await loadPosts();
+};
+
+function copy(text){
+  navigator.clipboard?.writeText(text).then(()=>{},()=>{});
+}
+
+function toCSV(rows){
+  const esc = v => `"${String(v??'').replace(/"/g,'""')}"`;
+  const head = ['id','author.id','author.name','createdAt','text','tags','likeCount','comments','imageUrl'];
+  const lines = [head.join(',')];
+  for (const p of rows) {
+    lines.push([
+      p.id,
+      p.author?.id||'',
+      p.author?.name||'',
+      p.createdAt||'',
+      (p.text||'').replace(/\r?\n/g,' '),
+      (p.tags||[]).join('|'),
+      p.likeCount||0,
+      (p.comments||[]).length,
+      p.imageUrl||'',
+    ].map(esc).join(','));
+  }
+  return lines.join('\r\n');
+}
+function download(name, content, mime='text/plain'){
+  const url = URL.createObjectURL(new Blob([content], {type: mime}));
+  const a = document.createElement('a'); a.href=url; a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+$('#btnExportCSV').onclick = ()=> download(`posts_${state.tab}.csv`, toCSV(state.list), 'text/csv');
+$('#btnExportJSON').onclick = ()=> download(`posts_${state.tab}.json`, JSON.stringify(state.list, null, 2), 'application/json');
+
+$('#tabFriends').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
+$('#tabHot').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
+$('#tabFollowing').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
+$('#btnReload').onclick = loadPosts;
 $('#btnNew').onclick = ()=>openEditor(null);
-$('#btnAdminReload').onclick = async ()=>{ try{ await api('/admin/reload',{method:'POST'}); alert('已重載檔案 → 記憶體'); load(); } catch(e){ alert('呼叫 /admin/reload 失敗：'+e.message); } };
+$('#btnAdminReload').onclick = async ()=>{
+  try { await api('/admin/reload', { method:'POST' }); alert('已重載檔案 → 記憶體'); loadPosts(); }
+  catch (e) { alert('呼叫 /admin/reload 失敗：' + e.message); }
+};
 $('#saveCfg').onclick = saveCfg;
-$('#authMode').onchange = ()=>{ const m=$('#authMode').value; $('#bearer').style.display = m==='bearer' ? 'inline-block' : 'none'; $('#debugUid').style.display = m==='debug' ? 'inline-block' : 'none'; };
-$('#viewMode').onchange = ()=>{ state.view=$('#viewMode').value; load(); };
-function setActiveTab(btn){ document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); state.tab = btn.dataset.tab; }
+$('#authMode').onchange = ()=>{
+  const m = $('#authMode').value;
+  $('#bearer').style.display = m==='bearer' ? 'inline-block' : 'none';
+  $('#debugUid').style.display = m==='debug' ? 'inline-block' : 'none';
+};
+$('#viewCards').onclick = ()=> setView('cards');
+$('#viewTable').onclick = ()=> setView('table');
+$('#quick').oninput = ()=>{ render(); };
+$('#tags').onchange = ()=>{ saveCfg(); loadPosts(); };
 
-// ---- Init ----
-loadCfg(); load();
+// ---- 新增/編輯（沿用卡片版） ----
+function toTagsString(tags){ return (tags||[]).join(','); }
+function parseTags(str){ return str.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean); }
+
+function openEditor(post){
+  state.editing = post;
+  $('#dlgTitle').textContent = post? '編輯貼文' : '新增貼文';
+  $('#fText').value = post?.text || '';
+  $('#fTags').value = post? toTagsString(post.tags) : '';
+  $('#fImg').value = '';
+  $('#btnDel').style.display = post? 'inline-block' : 'none';
+  $('#btnSubmit').onclick = submitEditor;
+  $('#btnDel').onclick = async ()=>{
+    if(!confirm('確定要刪除？')) return;
+    await api('/posts/'+post.id, { method:'DELETE' });
+    $('#dlg').close(); await loadPosts();
+  };
+  $('#dlg').showModal();
+}
+
+async function submitEditor(ev){
+  ev.preventDefault();
+  const isEdit = !!state.editing;
+  const text = $('#fText').value.trim();
+  const tags = parseTags($('#fTags').value);
+  let imageUrl = state.editing?.imageUrl || null;
+
+  // 若選了新檔 → 先上傳 /upload
+  const file = $('#fImg').files[0];
+  if (file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const base = $('#base').value.replace(/\/+$/,'');
+    const res = await fetch(base + '/upload', { method:'POST', headers: authHeaders(), body: fd });
+    if (!res.ok) { alert('上傳失敗：' + await res.text()); return; }
+    const j = await res.json();
+    imageUrl = j.url; // 伺服器回 /uploads/xxx
+  }
+
+  if (isEdit) {
+    await api('/posts/'+state.editing.id, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text, tags, imageUrl }),
+    });
+  } else {
+    await api('/posts', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text, tags, imageUrl }),
+    });
+  }
+  $('#dlg').close(); await loadPosts();
+}
+
+// 點讚 / 留言（卡片模式）
+async function toggleLike(p){ await api('/posts/'+p.id+'/like', { method:'POST' }); await loadPosts(); }
+async function addComment(p){
+  const t = prompt('輸入留言內容：'); if (!t) return;
+  await api('/posts/'+p.id+'/comments', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ text: t })
+  });
+  await loadPosts();
+}
+
+// init
+loadCfg();
+setView('cards');
+loadPosts();
 </script>
 </body>
 </html>

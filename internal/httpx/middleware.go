@@ -108,7 +108,7 @@ func devClaimsFromBearer(authz string) (email, uid string) {
 
 func WithAuth(app *AppCtx, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 免驗證模式：Debug > Bearer(passthrough 只撈 email/uid) > Cookie
+		// 免驗證模式：Debug > Bearer(passthrough 只撈 email/uid) > X-Auth-Uid > Cookie
 		if config.NoAuth() {
 			authz := r.Header.Get("Authorization")
 			var key string
@@ -122,6 +122,12 @@ func WithAuth(app *AppCtx, next http.HandlerFunc) http.HandlerFunc {
 			case strings.HasPrefix(authz, "Bearer "):
 				email, uid := devClaimsFromBearer(authz)
 				key = pickKey(email, uid)
+			}
+			// ★ 後援：若沒有 Authorization，就改用前端送來的冗餘身分
+			if key == "" {
+				if xu := strings.TrimSpace(r.Header.Get("X-Auth-Uid")); xu != "" {
+					key = strings.ToLower(xu)
+				}
 			}
 			if key == "" {
 				key = devUIDFromCookie(w, r)
@@ -172,6 +178,10 @@ func tryViewerUID(app *AppCtx, r *http.Request) string {
 				return k
 			}
 		}
+		// ★ 後援：讀取冗餘身分
+		if xu := strings.TrimSpace(r.Header.Get("X-Auth-Uid")); xu != "" {
+			return strings.ToLower(xu)
+		}
 		if c, err := r.Cookie(devUIDCookie); err == nil && c.Value != "" {
 			return c.Value
 		}
@@ -195,8 +205,8 @@ func CORS(next http.Handler) http.Handler {
 	wrap := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		// ★ 加上自訂的 X-Client-Id / X-Client-Alias
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Client-Id, X-Client-Alias")
+		// ★ 允許自訂標頭（含冗餘身分）
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Client-Id, X-Client-Alias, X-Auth-Uid")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

@@ -53,6 +53,9 @@ func main() {
 	mux.HandleFunc("/posts", httpx.HandlePosts(app))       // GET/POST
 	mux.HandleFunc("/posts/", httpx.HandlePostDetail(app)) // PUT/DELETE、/like、/comments
 
+	// （新增）依朋友清單查貼文
+	mux.HandleFunc("/posts/query", httpx.WithAuth(app, httpx.HandlePostsQuery(app))) // POST
+
 	// 自己 Profile
 	mux.HandleFunc("/me", httpx.WithAuth(app, httpx.HandleMe(app))) // GET/PATCH
 

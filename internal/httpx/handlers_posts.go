@@ -181,3 +181,38 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 
 // --- 管理員判斷（目前預設關閉；僅作者可刪/改）。之後要開放可在這裡實作 ---
 func isAdmin(_ *AppCtx, _ *http.Request) bool { return false }
+
+// 依前端傳入的好友清單查貼文：POST /posts/query
+// body: { "tab": "friends", "friendIds": ["a@x", "demo_bob"], "tags": ["kpop"] }
+// internal/httpx/handlers_posts.go
+func HandlePostsQuery(app *AppCtx) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Tab       string   `json:"tab"`
+			FriendIDs []string `json:"friendIds"`
+			Tags      []string `json:"tags"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if strings.ToLower(strings.TrimSpace(req.Tab)) != "friends" {
+			http.Error(w, "invalid tab (expected 'friends')", http.StatusBadRequest)
+			return
+		}
+
+		viewer := currentUID(r)
+		out := app.Store.ListByAuthors(req.FriendIDs, req.Tags, viewer)
+
+		// ✅ 再保險一次（理論上 ListByAuthors 已保證非 nil）
+		if out == nil {
+			out = make([]models.Post, 0)
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}

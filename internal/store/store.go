@@ -364,3 +364,52 @@ func (s *Store) ToggleLike(postID, uid string) (models.Post, bool) {
 	s.posts[idx] = p
 	return p, true
 }
+
+// 依作者清單與(可選)標籤過濾貼文，並套用 Decorate；結果依時間新→舊。
+// 依作者清單 + (可選) 標籤 過濾，並 Decorate + 依時間排序（或照 hot 需求改）
+// store/store.go
+func (s *Store) ListByAuthors(authors []string, tags []string, viewerUID string) []models.Post {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	authorSet := map[string]struct{}{}
+	for _, a := range authors {
+		a = strings.TrimSpace(a)
+		if a != "" {
+			authorSet[a] = struct{}{}
+		}
+	}
+
+	tagSet := map[string]struct{}{}
+	for _, t := range tags {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t != "" {
+			tagSet[t] = struct{}{}
+		}
+	}
+
+	// ✅ 用空 slice，而不是 nil
+	out := make([]models.Post, 0)
+
+	for _, p := range s.posts {
+		if _, ok := authorSet[p.Author.ID]; !ok {
+			continue
+		}
+		if len(tagSet) > 0 {
+			match := false
+			for _, pt := range p.Tags {
+				if _, ok := tagSet[strings.ToLower(pt)]; ok {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		out = append(out, s.Decorate(p, viewerUID))
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
+	return out
+}

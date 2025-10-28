@@ -71,7 +71,7 @@ func HandleTipsDaily(app *AppCtx) http.HandlerFunc {
 				ID:       "promo_explore_20251028",
 				Title:    "Explore功能全新推出",
 				Body:     "自由打造偶像桌布，放上照片、標語，還能加上生日倒數！",
-				ImageURL: "/uploads/promo_banner_1200x600.png",
+				ImageURL: "https://jimmylee16888.github.io/popcard-ad/promo_banner_1200x600.png", // ← 改這裡
 			},
 		}
 
@@ -86,6 +86,8 @@ func HandleTipsDaily(app *AppCtx) http.HandlerFunc {
 // 開啟 JSON 回應格式
 func enableJSON(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, max-age=0") // 讓 tips 每次都能即時更新
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 }
 
 // 紀錄請求細節，方便除錯

@@ -46,8 +46,8 @@ func main() {
 
 	// ===== 靜態檔 (上傳目錄) — 用專案根的 ./uploads，並轉成絕對路徑避免工作目錄問題
 	// 你的圖在：C:\Users\...\socialdemo-backend\uploads\promo_banner_1200x600.png
-	uploadRoot := "uploads"
-	absUploads, _ := filepath.Abs(uploadRoot)
+	// ===== 靜態檔 (上傳目錄) — 指向 cfg.UploadsDir（與 HandleUpload 寫入目標一致）
+	absUploads, _ := filepath.Abs(cfg.UploadsDir) // ← 關鍵
 	log.Printf("UPLOADS_DIR(real)= %s", absUploads)
 
 	mux.Handle(

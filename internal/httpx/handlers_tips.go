@@ -69,9 +69,9 @@ func HandleTipsDaily(app *AppCtx) http.HandlerFunc {
 		items := []TipItem{
 			{
 				ID:       "promo_explore_20251028",
-				Title:    "Explore功能全新推出",
-				Body:     "自由打造偶像桌布，放上照片、標語，還能加上生日倒數！",
-				ImageURL: "https://jimmylee16888.github.io/popcard-ad/promo_banner_1200x600.png", // ← 改這裡
+				Title:    "WAVE版本  全新推出",
+				Body:     "新增雲端訂閱功能，可使用雲端同步所有小卡(製作中)\n支援全卡全圖快照輸出，無須一張張輸入\n以海浪為主題，更加生動簡潔的介面與動畫！",
+				ImageURL: "https://jimmylee16888.github.io/popcard-ad/WAVE.png", // ← 改這裡
 			},
 		}
 

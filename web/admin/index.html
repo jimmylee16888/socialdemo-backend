@@ -89,7 +89,7 @@
     </div>
 
     <div class="opbar">
-      <button id="btnDeleteSel" class="danger" title="刪除勾選的貼文" style="display:none">刪除選取</button>
+      <button id="btnDeleteSel" class="danger" title="刪除勾選的貼文" style="display:none">刪除選取 (0)</button>
       <button id="btnExportCSV" class="ghost" title="匯出目前列表為 CSV">匯出 CSV</button>
       <button id="btnExportJSON" class="ghost" title="匯出目前列表為 JSON">匯出 JSON</button>
       <span class="muted">提示：NO_AUTH=1 下用 <span class="k">Debug UID</span>；正式上線用 <span class="k">Bearer</span> 放 Firebase ID Token。</span>
@@ -125,7 +125,7 @@
   <div class="footer">© demo admin</div>
 </main>
 
-<!-- 新增/編輯 dialog（沿用卡片模式的） -->
+<!-- 新增/編輯 dialog -->
 <dialog id="dlg" style="border:none;border-radius:16px;padding:0;background:#0e141a;color:#e6edf3">
   <form method="dialog" style="padding:16px;min-width:320px;width:min(560px,90vw)">
     <h3 id="dlgTitle">新增貼文</h3>
@@ -153,10 +153,12 @@ const state = {
   editing: null, // post or null
   selected: new Set(),
   sort: { key: 'createdAt', dir: 'desc' },
+  filtered: [],
 };
 
 function loadCfg() {
-  $('#base').value = localStorage.getItem('adm.base') || (location.origin.startsWith('http') ? location.origin : 'http://localhost:8088');
+  const defaultBase = (location.origin && /^https?:/.test(location.origin)) ? location.origin : 'http://localhost:8088';
+  $('#base').value = localStorage.getItem('adm.base') || defaultBase;
   const mode = localStorage.getItem('adm.mode') || 'debug';
   $('#authMode').value = mode;
   $('#debugUid').value = localStorage.getItem('adm.debugUid') || 'alice@example.com';
@@ -165,6 +167,9 @@ function loadCfg() {
   $('#debugUid').style.display = mode==='debug' ? 'inline-block' : 'none';
   $('#quick').value = localStorage.getItem('adm.quick') || '';
   $('#tags').value = localStorage.getItem('adm.tags') || '';
+  // 恢復 tab / view
+  state.tab  = localStorage.getItem('adm.tab')  || 'friends';
+  state.view = localStorage.getItem('adm.view') || 'cards';
 }
 function saveCfg() {
   localStorage.setItem('adm.base', $('#base').value.trim());
@@ -178,13 +183,16 @@ function saveCfg() {
 
 function authHeaders() {
   const mode = $('#authMode').value;
+  let h = {};
   if (mode === 'bearer') {
     const t = $('#bearer').value.trim();
-    return t ? { 'Authorization': 'Bearer ' + t } : {};
+    if (t) h['Authorization'] = 'Bearer ' + t;
   } else {
     const uid = $('#debugUid').value.trim() || 'u_me';
-    return { 'Authorization': 'Debug ' + uid };
+    h['Authorization'] = 'Debug ' + uid;
+    h['X-Auth-Uid']   = uid; // 讓後端直接取用 uid
   }
+  return h;
 }
 function imgAbs(url){
   if (!url) return '';
@@ -192,25 +200,34 @@ function imgAbs(url){
   return $('#base').value.replace(/\/+$/,'') + (url.startsWith('/')? url : '/'+url);
 }
 function escapeHTML(s){return (s||'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]))}
-function fmtTime(iso){ try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+function fmtTime(iso){ try { return iso ? new Date(iso).toLocaleString() : ''; } catch { return iso||''; } }
+function pickCreatedAt(p){ return p.createdAt || p.created_at || p.timestamp || null; }
 
 async function api(path, opt={}) {
   const base = $('#base').value.replace(/\/+$/,'');
   const headers = Object.assign({'Accept':'application/json'}, authHeaders(), opt.headers||{});
-  const res = await fetch(base + path, Object.assign({}, opt, {headers}));
+  let res;
+  try {
+    res = await fetch(base + path, Object.assign({}, opt, {headers}));
+  } catch (e) {
+    throw new Error('連線失敗：' + e.message);
+  }
   if (!res.ok) {
     const text = await res.text().catch(()=>res.statusText);
-    throw new Error(res.status + ' ' + text);
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`權限錯誤（${res.status}）：請檢查 Auth 設定。\n${text}`);
+    }
+    throw new Error(`${res.status} ${text}`);
   }
-  const ct = res.headers.get('content-type') || '';
-  if (ct.includes('application/json')) return res.json();
-  return res.text();
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  return ct.includes('application/json') ? res.json() : res.text();
 }
 
 function setActiveTab(btn) {
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   state.tab = btn.dataset.tab;
+  localStorage.setItem('adm.tab', state.tab);
 }
 
 function setView(v) {
@@ -220,16 +237,22 @@ function setView(v) {
   $('#grid').style.display = v==='cards' ? '' : 'none';
   $('#tblWrap').style.display = v==='table' ? '' : 'none';
   $('#btnDeleteSel').style.display = v==='table' ? '' : 'none';
+  $('#btnDeleteSel').textContent = `刪除選取 (${state.selected.size||0})`;
+  localStorage.setItem('adm.view', state.view);
   render();
 }
 
 async function loadPosts() {
-  const tags = $('#tags').value.trim();
-  const q = new URLSearchParams({ tab: state.tab });
-  if (tags) q.set('tags', tags);
-  const data = await api('/posts?' + q.toString());
-  state.list = data;
-  render();
+  try{
+    const tags = $('#tags').value.trim();
+    const q = new URLSearchParams({ tab: state.tab });
+    if (tags) q.set('tags', tags);
+    const data = await api('/posts?' + q.toString());
+    state.list = data || [];
+    render();
+  }catch(e){
+    alert('載入貼文失敗：' + e.message);
+  }
 }
 
 function render() {
@@ -241,13 +264,15 @@ function render() {
     ].join(' ').toLowerCase();
     return hay.includes(needle);
   });
-  // sort (table mode only; cards使用後端排序)
+  state.filtered = filtered;
+
+  // sort (table mode only; cards 使用後端排序)
   let list = filtered;
   if (state.view==='table') {
     const {key, dir} = state.sort;
     list = [...filtered].sort((a,b)=>{
       let va = a[key], vb = b[key];
-      if (key==='createdAt') { va = a.createdAt; vb = b.createdAt; }
+      if (key==='createdAt') { va = pickCreatedAt(a); vb = pickCreatedAt(b); }
       if (key==='likeCount') { va = a.likeCount|0; vb = b.likeCount|0; }
       if (va<vb) return dir==='asc'? -1: 1;
       if (va>vb) return dir==='asc'? 1: -1;
@@ -266,7 +291,7 @@ function renderCards(list) {
     card.className = 'card';
     card.innerHTML = `
       <div class="hd">
-        <div><strong>${escapeHTML(p.author?.name||'')}</strong> <span class="muted">· ${fmtTime(p.createdAt)}</span></div>
+        <div><strong>${escapeHTML(p.author?.name||'')}</strong> <span class="muted">· ${fmtTime(pickCreatedAt(p))}</span></div>
         <div class="row-right">
           <button class="ghost" data-act="like">❤ ${p.likeCount||0}${p.likedByMe?'（你讚過）':''}</button>
           <button class="ghost" data-act="comment">留言</button>
@@ -309,8 +334,8 @@ function renderTable(list) {
         <div class="mono muted">${escapeHTML(p.author?.id||'')}</div>
       </td>
       <td class="nowrap">
-        <div>${fmtTime(p.createdAt)}</div>
-        <div class="mono muted">${escapeHTML(p.createdAt)}</div>
+        <div>${fmtTime(pickCreatedAt(p))}</div>
+        <div class="mono muted">${escapeHTML(pickCreatedAt(p) || '')}</div>
       </td>
       <td class="truncate" title="${escapeHTML(p.text||'')}">${escapeHTML(p.text||'')}</td>
       <td>${tags||'<span class="muted">—</span>'}</td>
@@ -358,6 +383,7 @@ function renderTable(list) {
 function selToggle(id, checked){
   if (checked) state.selected.add(id); else state.selected.delete(id);
   $('#btnDeleteSel').disabled = state.selected.size===0;
+  $('#btnDeleteSel').textContent = `刪除選取 (${state.selected.size})`;
 }
 
 async function delOne(id){
@@ -393,7 +419,7 @@ function toCSV(rows){
       p.id,
       p.author?.id||'',
       p.author?.name||'',
-      p.createdAt||'',
+      pickCreatedAt(p)||'',
       (p.text||'').replace(/\r?\n/g,' '),
       (p.tags||[]).join('|'),
       p.likeCount||0,
@@ -409,8 +435,8 @@ function download(name, content, mime='text/plain'){
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
 }
 
-$('#btnExportCSV').onclick = ()=> download(`posts_${state.tab}.csv`, toCSV(state.list), 'text/csv');
-$('#btnExportJSON').onclick = ()=> download(`posts_${state.tab}.json`, JSON.stringify(state.list, null, 2), 'application/json');
+$('#btnExportCSV').onclick = ()=> download(`posts_${state.tab}.csv`, toCSV(state.filtered.length? state.filtered : state.list), 'text/csv');
+$('#btnExportJSON').onclick = ()=> download(`posts_${state.tab}.json`, JSON.stringify(state.filtered.length? state.filtered : state.list, null, 2), 'application/json');
 
 $('#tabFriends').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
 $('#tabHot').onclick = (e)=>{ setActiveTab(e.target); loadPosts(); };
@@ -432,7 +458,7 @@ $('#viewTable').onclick = ()=> setView('table');
 $('#quick').oninput = ()=>{ render(); };
 $('#tags').onchange = ()=>{ saveCfg(); loadPosts(); };
 
-// ---- 新增/編輯（沿用卡片版） ----
+// ---- 新增/編輯 ----
 function toTagsString(tags){ return (tags||[]).join(','); }
 function parseTags(str){ return str.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean); }
 
@@ -446,11 +472,29 @@ function openEditor(post){
   $('#btnSubmit').onclick = submitEditor;
   $('#btnDel').onclick = async ()=>{
     if(!confirm('確定要刪除？')) return;
-    await api('/posts/'+post.id, { method:'DELETE' });
-    $('#dlg').close(); await loadPosts();
+    try{
+      await api('/posts/'+post.id, { method:'DELETE' });
+      $('#dlg').close(); await loadPosts();
+    }catch(e){ alert('刪除失敗：' + e.message); }
   };
   $('#dlg').showModal();
 }
+
+// 支援在對話框「貼上圖片」→ 自動帶入檔案欄位
+document.addEventListener('paste', (ev)=>{
+  if (!$('#dlg').open) return;
+  const items = ev.clipboardData?.items || [];
+  for (const it of items) {
+    if (it.type?.startsWith('image/')) {
+      const file = it.getAsFile();
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      $('#fImg').files = dt.files;
+      alert('已貼上圖片，送出時會自動上傳。');
+      break;
+    }
+  }
+});
 
 async function submitEditor(ev){
   ev.preventDefault();
@@ -467,38 +511,67 @@ async function submitEditor(ev){
     const base = $('#base').value.replace(/\/+$/,'');
     const res = await fetch(base + '/upload', { method:'POST', headers: authHeaders(), body: fd });
     if (!res.ok) { alert('上傳失敗：' + await res.text()); return; }
-    const j = await res.json();
-    imageUrl = j.url; // 伺服器回 /uploads/xxx
+    let j;
+    const ct = (res.headers.get('content-type')||'').toLowerCase();
+    if (ct.includes('application/json')) j = await res.json();
+    else { // 純文字等容錯
+      const t = await res.text();
+      j = { url: t.trim() };
+    }
+    imageUrl = j.url;
+    if (!imageUrl) { alert('上傳回應沒有 url'); return; }
   }
 
-  if (isEdit) {
-    await api('/posts/'+state.editing.id, {
-      method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ text, tags, imageUrl }),
-    });
-  } else {
-    await api('/posts', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ text, tags, imageUrl }),
-    });
+  try{
+    if (isEdit) {
+      await api('/posts/'+state.editing.id, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ text, tags, imageUrl }),
+      });
+    } else {
+      await api('/posts', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ text, tags, imageUrl }),
+      });
+    }
+    $('#dlg').close(); await loadPosts();
+  }catch(e){
+    alert('送出失敗：' + e.message);
   }
-  $('#dlg').close(); await loadPosts();
 }
 
 // 點讚 / 留言（卡片模式）
-async function toggleLike(p){ await api('/posts/'+p.id+'/like', { method:'POST' }); await loadPosts(); }
+async function toggleLike(p){
+  try{ await api('/posts/'+p.id+'/like', { method:'POST' }); await loadPosts(); }
+  catch(e){ alert('按讚失敗：' + e.message); }
+}
 async function addComment(p){
   const t = prompt('輸入留言內容：'); if (!t) return;
-  await api('/posts/'+p.id+'/comments', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ text: t })
-  });
-  await loadPosts();
+  try{
+    await api('/posts/'+p.id+'/comments', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text: t })
+    });
+    await loadPosts();
+  }catch(e){
+    alert('留言失敗：' + e.message);
+  }
 }
 
 // init
 loadCfg();
-setView('cards');
+// 套用既有 tab 高亮
+const tabBtnMap = {
+  friends: $('#tabFriends'),
+  hot: $('#tabHot'),
+  following: $('#tabFollowing'),
+};
+if (tabBtnMap[state.tab]) setActiveTab(tabBtnMap[state.tab]);
+else setActiveTab($('#tabFriends'));
+
+// 檢視模式
+setView(state.view);
+// 首次載入
 loadPosts();
 </script>
 </body>

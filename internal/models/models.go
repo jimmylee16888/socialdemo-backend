@@ -33,6 +33,7 @@ type Profile struct {
 	Instagram     *string `json:"instagram"`
 	Facebook      *string `json:"facebook"`
 	LineId        *string `json:"lineId"`
+	Birthday      string  `json:"birthday,omitempty"` // 格式 yyyy-MM-dd
 	ShowInstagram bool    `json:"showInstagram"`
 	ShowFacebook  bool    `json:"showFacebook"`
 	ShowLine      bool    `json:"showLine"`

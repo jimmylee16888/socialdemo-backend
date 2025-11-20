@@ -42,7 +42,12 @@ func DefaultPaths() Paths {
 
 func EnsureDir(dir string) { _ = os.MkdirAll(dir, 0o755) }
 
-func NoAuth() bool { return os.Getenv("NO_AUTH") == "1" }
+// func NoAuth() bool { return os.Getenv("NO_AUTH") == "1" }
+// config/noauth.go
+
+func NoAuth() bool {
+	return true // ← 先強制開發模式
+}
 
 // Firebase Auth（保留；NO_AUTH=1 則不啟用）
 func NewAuthClient() *auth.Client {

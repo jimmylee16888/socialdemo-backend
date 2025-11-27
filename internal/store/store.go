@@ -76,6 +76,7 @@ func (s *Store) SaveProfiles(path string) { _ = writeJSONFile(path, s.profiles) 
 func (s *Store) SaveLikes(path string)    { _ = writeJSONFile(path, s.postLikes) }
 
 // Demo seed
+// Demo seed
 func (s *Store) SeedIfEmpty(postsFile string) {
 	s.mu.RLock()
 	empty := len(s.posts) == 0
@@ -84,29 +85,71 @@ func (s *Store) SeedIfEmpty(postsFile string) {
 	s.mu.RUnlock()
 
 	if empty {
-		s.Create(models.Post{
-			ID:        "p1",
-			Author:    models.User{ID: "demo_bob", Name: "Bob"},
-			Text:      "今天把 UI 卡片邊角修好了 ✅",
-			CreatedAt: nowISO(),
-			Comments:  []models.Comment{},
-			Tags:      []string{"flutter", "design"},
-		})
-		s.Create(models.Post{
-			ID:        "p2",
-			Author:    models.User{ID: "demo_alice", Name: "Alice"},
-			Text:      "嗨！這是我的第一篇 🙂",
-			CreatedAt: nowISO(),
-			Comments:  []models.Comment{},
-			Tags:      []string{"hello"},
-		})
+		seed := []models.Post{
+			{
+				ID:        "p1",
+				Author:    models.User{ID: "demo_bob", Name: "Bob"},
+				Text:      "今天把動態牆的 UI 卡片邊角修好了 ✅ 現在拿自己的應援小卡來排版超漂亮～",
+				CreatedAt: nowISO(),
+				Comments:  []models.Comment{},
+				Tags:      []string{"flutter", "design", "devlog"},
+			},
+			{
+				ID:        "p2",
+				Author:    models.User{ID: "demo_alice", Name: "Alice"},
+				Text:      "嗨！這是我的第一篇 🙂 以後想在這裡紀錄我的 K-pop 小卡收藏！",
+				CreatedAt: nowISO(),
+				Comments:  []models.Comment{},
+				Tags:      []string{"hello", "kpop", "photocard"},
+			},
+			{
+				ID:        "p3",
+				Author:    models.User{ID: "demo_alice", Name: "Alice"},
+				Text:      "今天把 LE SSERAFIM 新專的小卡都輸入進 APP 了 🃏\n感覺自己的「偶像空間」慢慢成形，好有成就感！",
+				CreatedAt: nowISO(),
+				Comments:  []models.Comment{},
+				Tags:      []string{"kpop", "lesserafim", "collection", "idol-room"},
+			},
+			{
+				ID:        "p4",
+				Author:    models.User{ID: "demo_bob", Name: "Bob"},
+				Text:      "有沒有人想換小卡？我這裡多了好幾張重複的 🥲\n之後想做一個『交換中』的專區，讓大家更好配對。",
+				CreatedAt: nowISO(),
+				Comments:  []models.Comment{},
+				Tags:      []string{"trade", "photocard", "feature-idea"},
+			},
+			{
+				ID:        "p5",
+				Author:    models.User{ID: "demo_alice", Name: "Alice"},
+				Text:      "剛把專輯架上的封面照都拍起來放進 APP 的專輯牆 📀\n滑一滑真的很像在逛自己的小型展覽館。",
+				CreatedAt: nowISO(),
+				Comments:  []models.Comment{},
+				Tags:      []string{"album", "shelf", "collection", "design"},
+			},
+			{
+				ID:        "p6",
+				Author:    models.User{ID: "demo_bob", Name: "Bob"},
+				Text:      "想做一個『我的偶像空間』主題頁：\n背景可以放舞台照，前面是小卡、專輯、應援棒一起排版，\n再加上動態貼文，就變成專屬自己的 idol profile ✨",
+				CreatedAt: nowISO(),
+				Comments:  []models.Comment{},
+				Tags:      []string{"idea", "idol-space", "kpop", "ui"},
+			},
+		}
+
+		for _, p := range seed {
+			s.Create(p)
+		}
 		s.SavePosts(postsFile)
 	}
 
 	// Profile 的 Upsert / Get 在 profile.go，這裡只呼叫
 	if !hasAlice {
 		nick := "Alice"
-		s.UpsertProfile(models.Profile{ID: "demo_alice", Name: "Alice", Nickname: &nick})
+		s.UpsertProfile(models.Profile{
+			ID:       "demo_alice",
+			Name:     "Alice",
+			Nickname: &nick,
+		})
 	}
 	if !hasBob {
 		nick := "Bob"

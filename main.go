@@ -62,6 +62,9 @@ func main() {
 	mux.HandleFunc("/posts", httpx.HandlePosts(app))       // GET/POST
 	mux.HandleFunc("/posts/", httpx.HandlePostDetail(app)) // PUT/DELETE、/like、/comments
 
+	// 🔹 Library sync
+	mux.HandleFunc("/api/v1/library/sync", httpx.WithAuth(app, httpx.HandleLibrarySync(app)))
+
 	// Tips
 	mux.HandleFunc("/tips/today", httpx.HandleTipsToday(app))
 	mux.HandleFunc("/tips/daily", httpx.HandleTipsDaily(app))

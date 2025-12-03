@@ -87,3 +87,58 @@ func HandleLibrarySync(app *AppCtx) http.HandlerFunc {
 		}
 	}
 }
+
+// /api/v1/library/snapshot
+//
+// 流程：
+// 1) 用 currentUID(r) 拿 user key
+// 2) 讀 data/library_<uid>.json
+// 3) 把裡面的 "payload" 原封不動回給 App
+func HandleLibrarySnapshot(app *AppCtx) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		uid := currentUID(r)
+		if uid == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		filename := "library_" + uid + ".json"
+		path := filepath.Join(app.Paths.DataDir, filename)
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// 還沒 sync 過：回 404，讓前端知道「沒有雲端 snapshot」
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			log.Printf("[library-snapshot] read file %s error: %v", path, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		var wrapped map[string]any
+		if err := json.Unmarshal(data, &wrapped); err != nil {
+			log.Printf("[library-snapshot] unmarshal error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		payload, ok := wrapped["payload"]
+		if !ok {
+			log.Printf("[library-snapshot] missing payload field in %s", path)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(payload); err != nil {
+			log.Printf("[library-snapshot] write response error: %v", err)
+		}
+	}
+}

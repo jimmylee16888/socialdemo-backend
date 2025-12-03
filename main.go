@@ -64,6 +64,8 @@ func main() {
 
 	// 🔹 Library sync
 	mux.HandleFunc("/api/v1/library/sync", httpx.WithAuth(app, httpx.HandleLibrarySync(app)))
+	// 🔹 Library snapshot（初次登入時，從雲端拉最後一次快照回來）
+	mux.HandleFunc("/api/v1/library/snapshot", httpx.WithAuth(app, httpx.HandleLibrarySnapshot(app)))
 
 	// Tips
 	mux.HandleFunc("/tips/today", httpx.HandleTipsToday(app))

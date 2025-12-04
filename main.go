@@ -20,6 +20,11 @@ func main() {
 	// 資料層（本地 JSON 持久化）
 	st := store.NewStore()
 	st.LoadAll(cfg.PostsFile, cfg.TagsFile, cfg.FriendsFile, cfg.ProfilesFile, cfg.LikesFile)
+
+	// 🔻 新增：載入 Boards + DM
+	st.LoadBoards(cfg.BoardsFile)
+	st.LoadDM(cfg.ConversationsFile, cfg.MessagesFile)
+
 	st.SeedIfEmpty(cfg.PostsFile)
 
 	// Firebase（驗證保留；NO_AUTH=1 時走免驗證）
@@ -73,6 +78,14 @@ func main() {
 
 	// 依朋友清單查貼文
 	mux.HandleFunc("/posts/query", httpx.WithAuth(app, httpx.HandlePostsQuery(app)))
+
+	// 🔹 Boards
+	mux.HandleFunc("/boards", httpx.WithAuth(app, httpx.HandleBoards(app)))    // GET/POST
+	mux.HandleFunc("/boards/", httpx.WithAuth(app, httpx.HandleBoardSub(app))) // /boards/{id} 與 /boards/{id}/posts
+
+	// 🔹 DM
+	mux.HandleFunc("/conversations", httpx.WithAuth(app, httpx.HandleConversations(app)))         // GET/POST
+	mux.HandleFunc("/conversations/", httpx.WithAuth(app, httpx.HandleConversationMessages(app))) // GET/POST /conversations/{id}/messages
 
 	// 自己 Profile / tags / friends
 	mux.HandleFunc("/me", httpx.WithAuth(app, httpx.HandleMe(app)))

@@ -19,6 +19,11 @@ type Paths struct {
 	FriendsFile  string
 	ProfilesFile string
 	LikesFile    string
+
+	// 🔻 新增
+	BoardsFile        string
+	ConversationsFile string
+	MessagesFile      string
 }
 
 func DefaultPaths() Paths {
@@ -37,6 +42,11 @@ func DefaultPaths() Paths {
 		FriendsFile:  filepath.Join(dataDir, "friends.json"),
 		ProfilesFile: filepath.Join(dataDir, "profiles.json"),
 		LikesFile:    filepath.Join(dataDir, "likes.json"),
+
+		// 🔻 新增
+		BoardsFile:        filepath.Join(dataDir, "boards.json"),
+		ConversationsFile: filepath.Join(dataDir, "conversations.json"),
+		MessagesFile:      filepath.Join(dataDir, "messages.json"),
 	}
 }
 

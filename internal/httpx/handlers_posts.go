@@ -22,7 +22,9 @@ func HandlePosts(app *AppCtx) http.HandlerFunc {
 			if t := r.URL.Query().Get("tags"); t != "" {
 				tags = strings.Split(t, ",")
 			}
-			writeJSON(w, http.StatusOK, app.Store.List(tab, tags, viewer))
+			posts := app.Store.List(tab, tags, viewer)
+			hydratePostAuthors(app, posts)
+			writeJSON(w, http.StatusOK, posts)
 
 		case http.MethodPost:
 			// 建立貼文：作者=token 身分；前端不需也不能指定作者/暱稱
@@ -39,16 +41,21 @@ func HandlePosts(app *AppCtx) http.HandlerFunc {
 				uid := currentUID(r)
 				p := models.Post{
 					ID:        time.Now().Format("20060102T150405.000000000"),
-					Author:    models.User{ID: uid, Name: app.Store.DisplayName(uid)},
+					Author:    models.User{ID: uid}, // ✅ 不要在這裡存 Name
 					Text:      req.Text,
 					CreatedAt: time.Now().UTC().Format(time.RFC3339),
 					Comments:  []models.Comment{},
 					Tags:      req.Tags,
 					ImageURL:  req.ImageURL,
 				}
+
 				created := app.Store.Create(p)
 				app.Store.SavePosts(app.Paths.PostsFile)
-				writeJSON(w, http.StatusOK, app.Store.Decorate(created, uid))
+
+				out := []models.Post{app.Store.Decorate(created, uid)}
+				hydratePostAuthors(app, out)
+				writeJSON(w, http.StatusOK, out[0])
+
 			})(w, r)
 
 		default:
@@ -164,7 +171,7 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 				}
 				p.Comments = append(p.Comments, models.Comment{
 					ID:        time.Now().Format("20060102T150405.000000000"),
-					Author:    models.User{ID: uid, Name: app.Store.DisplayName(uid)},
+					Author:    models.User{ID: uid}, // ✅ 不要存 Name
 					Text:      req.Text,
 					CreatedAt: time.Now().UTC().Format(time.RFC3339),
 				})
@@ -214,5 +221,38 @@ func HandlePostsQuery(app *AppCtx) http.HandlerFunc {
 			out = make([]models.Post, 0)
 		}
 		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+func displayNameFromProfile(p models.Profile) string {
+	if p.Nickname != nil && *p.Nickname != "" {
+		return *p.Nickname
+	}
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.ID
+}
+
+func hydratePostAuthors(app *AppCtx, posts []models.Post) {
+	for i := range posts {
+		// post author
+		if prof, ok := app.Store.GetProfile(posts[i].Author.ID); ok {
+			posts[i].Author.Name = displayNameFromProfile(prof)
+			posts[i].Author.AvatarAsset = prof.AvatarURL // 你 models.User 用 AvatarAsset，這裡直接塞 avatarUrl
+		} else {
+			posts[i].Author.Name = posts[i].Author.ID
+		}
+
+		// comments author
+		for j := range posts[i].Comments {
+			uid := posts[i].Comments[j].Author.ID
+			if prof, ok := app.Store.GetProfile(uid); ok {
+				posts[i].Comments[j].Author.Name = displayNameFromProfile(prof)
+				posts[i].Comments[j].Author.AvatarAsset = prof.AvatarURL
+			} else {
+				posts[i].Comments[j].Author.Name = uid
+			}
+		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 func HandlePosts(app *AppCtx) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
+
 		case http.MethodGet:
 			viewer := tryViewerUID(app, r)
 			tab := r.URL.Query().Get("tab")
@@ -22,12 +23,12 @@ func HandlePosts(app *AppCtx) http.HandlerFunc {
 			if t := r.URL.Query().Get("tags"); t != "" {
 				tags = strings.Split(t, ",")
 			}
+
 			posts := app.Store.List(tab, tags, viewer)
-			hydratePostAuthors(app, posts)
+			hydratePostAuthors(app, posts) // ✅ 補暱稱/頭像
 			writeJSON(w, http.StatusOK, posts)
 
 		case http.MethodPost:
-			// 建立貼文：作者=token 身分；前端不需也不能指定作者/暱稱
 			WithAuth(app, func(w http.ResponseWriter, r *http.Request) {
 				var req struct {
 					Text     string   `json:"text"`
@@ -38,10 +39,11 @@ func HandlePosts(app *AppCtx) http.HandlerFunc {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
+
 				uid := currentUID(r)
 				p := models.Post{
 					ID:        time.Now().Format("20060102T150405.000000000"),
-					Author:    models.User{ID: uid}, // ✅ 不要在這裡存 Name
+					Author:    models.User{ID: uid}, // ✅ 不在這裡存 name
 					Text:      req.Text,
 					CreatedAt: time.Now().UTC().Format(time.RFC3339),
 					Comments:  []models.Comment{},
@@ -52,10 +54,11 @@ func HandlePosts(app *AppCtx) http.HandlerFunc {
 				created := app.Store.Create(p)
 				app.Store.SavePosts(app.Paths.PostsFile)
 
-				out := []models.Post{app.Store.Decorate(created, uid)}
-				hydratePostAuthors(app, out)
-				writeJSON(w, http.StatusOK, out[0])
-
+				// Decorate + hydrate 再回傳
+				decorated := app.Store.Decorate(created, uid)
+				tmp := []models.Post{decorated}
+				hydratePostAuthors(app, tmp)
+				writeJSON(w, http.StatusOK, tmp[0])
 			})(w, r)
 
 		default:
@@ -78,6 +81,7 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 		// /posts/{id}
 		if len(parts) == 1 {
 			switch r.Method {
+
 			case http.MethodPut:
 				WithAuth(app, func(w http.ResponseWriter, r *http.Request) {
 					var req struct {
@@ -89,20 +93,25 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 						http.Error(w, err.Error(), http.StatusBadRequest)
 						return
 					}
+
 					p, idx := app.Store.ByID(id)
 					if idx < 0 {
 						http.Error(w, "not found", http.StatusNotFound)
 						return
 					}
-					// 只有作者本人(或管理員)可編輯
 					if currentUID(r) != p.Author.ID && !isAdmin(app, r) {
 						http.Error(w, "forbidden", http.StatusForbidden)
 						return
 					}
+
 					p.Text, p.Tags, p.ImageURL = req.Text, req.Tags, req.ImageURL
 					updated := app.Store.UpdateAt(idx, p)
 					app.Store.SavePosts(app.Paths.PostsFile)
-					writeJSON(w, http.StatusOK, app.Store.Decorate(updated, currentUID(r)))
+
+					decorated := app.Store.Decorate(updated, currentUID(r))
+					tmp := []models.Post{decorated}
+					hydratePostAuthors(app, tmp)
+					writeJSON(w, http.StatusOK, tmp[0])
 				})(w, r)
 
 			case http.MethodDelete:
@@ -112,12 +121,11 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 						http.Error(w, "not found", http.StatusNotFound)
 						return
 					}
-					// 只有作者本人(或管理員)可刪除
 					if currentUID(r) != p.Author.ID && !isAdmin(app, r) {
 						http.Error(w, "forbidden", http.StatusForbidden)
 						return
 					}
-					// 刪除本機上傳檔
+
 					if p.ImageURL != nil && strings.HasPrefix(*p.ImageURL, "/uploads/") {
 						_ = os.Remove(filepath.Join(app.Paths.UploadsDir, filepath.Base(*p.ImageURL)))
 					}
@@ -134,6 +142,7 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 
 		// /posts/{id}/xxx
 		switch parts[1] {
+
 		case "like":
 			WithAuth(app, func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodPost {
@@ -147,7 +156,11 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 					return
 				}
 				app.Store.SaveLikes(app.Paths.LikesFile)
-				writeJSON(w, http.StatusOK, app.Store.Decorate(p, uid))
+
+				decorated := app.Store.Decorate(p, uid)
+				tmp := []models.Post{decorated}
+				hydratePostAuthors(app, tmp)
+				writeJSON(w, http.StatusOK, tmp[0])
 			})(w, r)
 
 		case "comments":
@@ -163,21 +176,28 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
+
 				uid := currentUID(r)
 				p, idx := app.Store.ByID(id)
 				if idx < 0 {
 					http.Error(w, "not found", http.StatusNotFound)
 					return
 				}
+
 				p.Comments = append(p.Comments, models.Comment{
 					ID:        time.Now().Format("20060102T150405.000000000"),
-					Author:    models.User{ID: uid}, // ✅ 不要存 Name
+					Author:    models.User{ID: uid}, // ✅ 不存 name
 					Text:      req.Text,
 					CreatedAt: time.Now().UTC().Format(time.RFC3339),
 				})
+
 				updated := app.Store.UpdateAt(idx, p)
 				app.Store.SavePosts(app.Paths.PostsFile)
-				writeJSON(w, http.StatusOK, app.Store.Decorate(updated, uid))
+
+				decorated := app.Store.Decorate(updated, uid)
+				tmp := []models.Post{decorated}
+				hydratePostAuthors(app, tmp)
+				writeJSON(w, http.StatusOK, tmp[0])
 			})(w, r)
 
 		default:
@@ -189,9 +209,7 @@ func HandlePostDetail(app *AppCtx) http.HandlerFunc {
 // --- 管理員判斷（目前預設關閉；僅作者可刪/改）。之後要開放可在這裡實作 ---
 func isAdmin(_ *AppCtx, _ *http.Request) bool { return false }
 
-// 依前端傳入的好友清單查貼文：POST /posts/query
-// body: { "tab": "friends", "friendIds": ["a@x", "demo_bob"], "tags": ["kpop"] }
-// internal/httpx/handlers_posts.go
+// POST /posts/query
 func HandlePostsQuery(app *AppCtx) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -215,11 +233,11 @@ func HandlePostsQuery(app *AppCtx) http.HandlerFunc {
 
 		viewer := currentUID(r)
 		out := app.Store.ListByAuthors(req.FriendIDs, req.Tags, viewer)
-
-		// ✅ 再保險一次（理論上 ListByAuthors 已保證非 nil）
 		if out == nil {
 			out = make([]models.Post, 0)
 		}
+
+		hydratePostAuthors(app, out) // ✅ 你原本漏了
 		writeJSON(w, http.StatusOK, out)
 	}
 }
@@ -239,9 +257,10 @@ func hydratePostAuthors(app *AppCtx, posts []models.Post) {
 		// post author
 		if prof, ok := app.Store.GetProfile(posts[i].Author.ID); ok {
 			posts[i].Author.Name = displayNameFromProfile(prof)
-			posts[i].Author.AvatarAsset = prof.AvatarURL // 你 models.User 用 AvatarAsset，這裡直接塞 avatarUrl
+			posts[i].Author.AvatarURL = prof.AvatarURL
 		} else {
 			posts[i].Author.Name = posts[i].Author.ID
+			posts[i].Author.AvatarURL = nil
 		}
 
 		// comments author
@@ -249,9 +268,10 @@ func hydratePostAuthors(app *AppCtx, posts []models.Post) {
 			uid := posts[i].Comments[j].Author.ID
 			if prof, ok := app.Store.GetProfile(uid); ok {
 				posts[i].Comments[j].Author.Name = displayNameFromProfile(prof)
-				posts[i].Comments[j].Author.AvatarAsset = prof.AvatarURL
+				posts[i].Comments[j].Author.AvatarURL = prof.AvatarURL
 			} else {
 				posts[i].Comments[j].Author.Name = uid
+				posts[i].Comments[j].Author.AvatarURL = nil
 			}
 		}
 	}

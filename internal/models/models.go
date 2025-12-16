@@ -1,9 +1,9 @@
 package models
 
 type User struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	AvatarAsset *string `json:"avatarAsset,omitempty"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	AvatarURL *string `json:"avatarUrl,omitempty"`
 }
 
 type Comment struct {
